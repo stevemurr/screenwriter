@@ -30,13 +30,42 @@ import Foundation
 /// Pagination is a single linear pass that allocates one `PageLine` per printed
 /// line. It runs in a few milliseconds on the largest script in the reference
 /// library, which is what lets the status bar keep a live page count; see
-/// `PaginatorPerformanceTests`.
+/// `PaginatorPerformanceTests` for the latency and `PaginateScalingTests` for
+/// the shape of the curve.
 ///
 /// Three pages out of 508 still disagree with Highland, all at the foot of a
 /// page: twice Highland moves a block that fits its remaining rows exactly, and
 /// once it emits a wholly blank page after a `===`. No rule in the corpus
 /// explains either, and inventing one to close the gap would be tuning against
 /// noise.
+///
+/// Measured facts about the cost, so the next person does not have to find them
+/// again. All CPU time, `-c release`, on the vendored 91 KB / 3 581-line
+/// `anal-informant.fountain`:
+///
+/// - **5.5ms**, against a 120ms debounce, off the main actor. There is no
+///   frame budget here to blow; anything below is invisible in the app and
+///   worth having only if it is also free.
+/// - **Nothing measures text.** This file and everything it calls import
+///   `Foundation` and nothing else — no CoreText, no AppKit. Courier is
+///   monospaced, so a width is a character count. Verified rather than assumed.
+/// - **Roughly half the time goes on reading bridged `NSString`s.** `LineIndex`
+///   cuts every line out of the document with `NSString.substring(with:)`, so
+///   `Element.text` is a `__NSCFString` and each `.utf8` byte read is an
+///   `objc_msgSend` into `-characterAtIndex:`. Handed the same script with the
+///   same element text natively stored, this paginates in **3.1ms instead of
+///   5.4ms for identical output**. The lever is in `Parse/`, not here: pulling
+///   the bytes over on this side costs an allocation per element and gives back
+///   only 0.2ms of it.
+/// - **The tallest block in the whole library is 25 source lines**, across all
+///   76 scripts and 28 177 blocks. No real script has ever handed the splitter
+///   a block that fills a page by itself, so the whole repeated-split path —
+///   the carried `(CONT'D)`, the second and later `(MORE)`, the fill-and-carry
+///   fallback below — is **unreachable from the corpus**. A page-break bug that
+///   duplicates a character of the script from the second break of a block
+///   onward passes all 184 other tests in this suite, the 508-page Highland
+///   fidelity check included; `PaginateTallBlockTests` is the one that catches
+///   it, and `PaginateScalingTests` guards the shape of the curve.
 public enum Paginator {
 
     // MARK: - Entry points
@@ -608,24 +637,46 @@ public enum Paginator {
         ) -> Position? {
             guard free >= 2 + reserve, rows.count >= 4 else { return nil }
 
+            /// How many of `rows` stay when the block is split at `position`.
+            ///
+            /// A lower bound, not a scan. `rows` is ordered by position — the
+            /// wrap walks a block's paragraphs in order and a paragraph's
+            /// offsets in order — and a repeated cue is always row 0 at
+            /// position (0, 0), ahead of every candidate. This was a linear
+            /// scan, and since it is asked once per candidate that made `split`
+            /// quadratic in the height of the block; see `verdict`.
             func keptRows(before position: Position) -> Int {
-                var kept = 0
-                for row in rows {
-                    if row.position < position || row.generated == .continuedCue { kept += 1 }
-                    else { break }
+                var low = 0
+                var high = rows.count
+                while low < high {
+                    let middle = (low + high) / 2
+                    if rows[middle].position < position
+                        || rows[middle].generated == .continuedCue {
+                        low = middle + 1
+                    } else {
+                        high = middle
+                    }
                 }
-                return kept
+                return low
             }
 
-            func isLegal(_ position: Position) -> Bool {
+            /// `.past` means the candidate already keeps more rows than the
+            /// page has free. Candidates arrive in ascending order and
+            /// `keptRows` only grows with the position, so nothing after a
+            /// `.past` can be legal and the search stops there rather than
+            /// walking the whole remaining block.
+            enum Verdict { case legal, illegal, past }
+
+            func verdict(_ position: Position) -> Verdict {
                 let kept = keptRows(before: position)
-                guard kept >= 2, kept + reserve <= free, rows.count - kept >= 2 else { return false }
-                return rows[kept - 1].kind != .parenthetical
+                guard kept + reserve <= free else { return .past }
+                guard kept >= 2, rows.count - kept >= 2 else { return .illegal }
+                return rows[kept - 1].kind == .parenthetical ? .illegal : .legal
             }
 
             // Sentence boundaries, latest first.
             var best: Position?
-            for (index, paragraph) in block.paragraphs.enumerated() {
+            sentences: for (index, paragraph) in block.paragraphs.enumerated() {
                 guard index >= from.paragraph else { continue }
                 // A cue and a parenthetical are indivisible: neither is prose,
                 // and splitting inside one produces nonsense.
@@ -634,8 +685,12 @@ public enum Paginator {
                 for boundary in paragraph.sentenceBreaks
                 where boundary > 0 && boundary < paragraph.utf16Length {
                     let position = Position(paragraph: index, offset: boundary)
-                    guard position > from, isLegal(position) else { continue }
-                    best = position
+                    guard position > from else { continue }
+                    switch verdict(position) {
+                    case .legal: best = position
+                    case .illegal: continue
+                    case .past: break sentences
+                    }
                 }
             }
             if let best { return best }
@@ -643,8 +698,11 @@ public enum Paginator {
             // Line boundaries.
             var line: Position?
             for row in rows where row.position > from {
-                guard isLegal(row.position) else { continue }
-                line = row.position
+                switch verdict(row.position) {
+                case .legal: line = row.position
+                case .illegal: continue
+                case .past: return line
+                }
             }
             return line
         }
@@ -675,13 +733,23 @@ public enum Paginator {
 
         // MARK: Page construction
 
+        /// The drawn width of a line, in points.
+        ///
+        /// Only `.right` and `.centered` lines need it — a left-aligned line
+        /// starts at its column's left edge whatever it says — and they are
+        /// about one printed line in a hundred. Computing it for every line
+        /// instead cost 0.45ms of the 6.0ms release pagination of the 91 KB
+        /// script, because `unicodeScalars.count` walks the whole string.
+        private func width(of text: String) -> CGFloat {
+            CGFloat(text.unicodeScalars.count) * layout.characterWidth
+        }
+
         private func makePage(index: Int, rows: [Row]) -> PaginatedPage {
             var lines: [PageLine] = []
             lines.reserveCapacity(rows.count)
             var scenes: [Int] = []
 
             for (row, source) in rows.enumerated() {
-                let width = CGFloat(source.text.unicodeScalars.count) * layout.characterWidth
                 let x: CGFloat
                 switch (source.generated, source.alignment) {
                 case (.more, _):
@@ -697,9 +765,9 @@ public enum Paginator {
                 case (_, .left):
                     x = layout.leftEdge(for: source.kind)
                 case (_, .right):
-                    x = layout.transitionRight - width
+                    x = layout.transitionRight - width(of: source.text)
                 case (_, .centered):
-                    x = (layout.pageWidth - width) / 2
+                    x = (layout.pageWidth - width(of: source.text)) / 2
                 }
                 lines.append(
                     PageLine(
@@ -774,7 +842,6 @@ public enum Paginator {
 
             func add(_ text: String, row: Int, centered: Bool) {
                 guard !text.isEmpty else { return }
-                let width = CGFloat(text.unicodeScalars.count) * layout.characterWidth
                 lines.append(
                     PageLine(
                         kind: .action,
@@ -784,7 +851,7 @@ public enum Paginator {
                         sourceOffset: titlePage.range.location,
                         sceneIndex: nil,
                         row: row,
-                        x: centered ? (layout.pageWidth - width) / 2 : 72,
+                        x: centered ? (layout.pageWidth - width(of: text)) / 2 : 72,
                         y: layout.titleBlockTop + CGFloat(row) * layout.titleLineHeight
                     )
                 )
