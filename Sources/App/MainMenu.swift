@@ -76,6 +76,8 @@ enum MainMenu {
             menu.addItem(.separator())
             add(menu, "Title Page…", #selector(AppDelegate.showTitlePage(_:)), "t", [.command, .shift])
             menu.addItem(.separator())
+            add(menu, "Export PDF…", #selector(ScreenplayDocument.exportPDF(_:)), "e")
+            menu.addItem(.separator())
             add(menu, "Page Setup…", #selector(NSDocument.runPageLayout(_:)), "p", [.command, .shift])
             add(menu, "Print…", #selector(NSDocument.printDocument(_:)), "p")
         }

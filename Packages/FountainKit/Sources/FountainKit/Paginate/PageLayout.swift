@@ -28,6 +28,11 @@ public struct PageLayout: Sendable, Hashable {
     /// A fixed indent, *not* a centred cue. Verified across the corpus.
     public var characterLeft: CGFloat = 249
     public var moreLeft: CGFloat = 214.2
+    /// A parenthetical's second and later lines hang here rather than returning
+    /// to `parentheticalLeft`. Measured at x=214.195 over 788 continuation lines
+    /// — the same column `(MORE)` sits in, which is presumably where it came
+    /// from. `parentheticalContinuationMeasure` is its matching width.
+    public var parentheticalContinuationLeft: CGFloat = 214.195
 
     /// Right edge shared by action and transitions.
     public var rightEdge: CGFloat = 561
@@ -42,6 +47,14 @@ public struct PageLayout: Sendable, Hashable {
     /// first row's baseline at y=579.4 in PDF coordinates.
     public var titleLineHeight: CGFloat = 14.4
     public var titleBlockTop: CGFloat = 204.272
+
+    /// Distance from the top of a line's box down to its baseline.
+    ///
+    /// Derived from the oracle rather than from the font's ascent: `bodyTop` is
+    /// 72.672 from the top of the page and Highland's first baseline sits at
+    /// y=711 from the bottom, which is 81 from the top. Renderers add this to
+    /// `PageLine.y` before flipping into PDF coordinates.
+    public var baselineOffset: CGFloat = 8.328
 
     // MARK: - Character measures
     //

@@ -1,3 +1,4 @@
+import AppKit
 import FountainKit
 import SwiftUI
 
@@ -137,6 +138,15 @@ struct RootView: View {
             }
             .help("Show or hide the scene inspector")
             .accessibilityIdentifier("toggle.inspector")
+        }
+        ToolbarItem {
+            Button {
+                NSApp.sendAction(#selector(ScreenplayDocument.exportPDF(_:)), to: nil, from: nil)
+            } label: {
+                Label("Export PDF", systemImage: "square.and.arrow.up")
+            }
+            .help("Export a PDF of this screenplay")
+            .accessibilityIdentifier("toolbar.exportPDF")
         }
         ToolbarItem {
             Button {

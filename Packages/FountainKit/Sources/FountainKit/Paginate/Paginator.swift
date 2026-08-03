@@ -686,6 +686,14 @@ public enum Paginator {
                 switch (source.generated, source.alignment) {
                 case (.more, _):
                     x = layout.moreLeft
+                case (_, .left) where source.kind == .parenthetical
+                    && source.position.offset > 0:
+                    // A parenthetical hangs its continuation lines rather than
+                    // returning to its own left edge. Without this the whole
+                    // column vanishes: Highland sets 38 lines at 214.195 in the
+                    // reference export and we set none, which the PDF fidelity
+                    // test catches as a missing column.
+                    x = layout.parentheticalContinuationLeft
                 case (_, .left):
                     x = layout.leftEdge(for: source.kind)
                 case (_, .right):
