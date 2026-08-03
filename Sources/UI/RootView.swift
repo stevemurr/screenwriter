@@ -19,8 +19,45 @@ struct RootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                if model.showsOutline {
+            if model.workspace == .board {
+                BeatBoardView(
+                    model: model,
+                    undoManager: document.undoManager,
+                    selection: $selection
+                )
+            } else {
+                writingLayout
+            }
+            Divider()
+            StatusBar(model: model, session: session)
+        }
+        .background(Color(nsColor: Style.editorBackground))
+        .toolbar { toolbarContent }
+        .sheet(isPresented: $isEditingTitlePage) {
+            TitlePageInspector(model: model)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showTitlePageInspector)) { _ in
+            isEditingTitlePage = true
+        }
+        .onChange(of: model.text) { _, _ in
+            document.noteTextEdited()
+        }
+        .onChange(of: model.workspace) { _, mode in
+            // Production is the writing layout with the inspector open; the
+            // inspector stays an independent toggle everywhere else.
+            if mode == .production { model.showsInspector = true }
+        }
+        .onChange(of: selection) { _, target in
+            // Selecting in the sidebar moves the caret, which is what makes the
+            // list a navigator rather than a read-only outline.
+            guard let offset = target?.sourceOffset(in: model.script) else { return }
+            session.jump(to: offset)
+        }
+    }
+
+    private var writingLayout: some View {
+        HStack(spacing: 0) {
+            if model.showsOutline {
                     OutlineSidebar(
                         script: model.script,
                         metrics: model.sceneMetrics,
@@ -43,31 +80,11 @@ struct RootView: View {
                     .frame(minWidth: 340)
                 }
 
-                if model.showsInspector {
-                    Divider()
-                    SceneInspector(model: model, sceneIndex: selectedSceneIndex)
-                        .frame(width: 300)
-                }
+            if model.showsInspector {
+                Divider()
+                SceneInspector(model: model, sceneIndex: selectedSceneIndex)
+                    .frame(width: 300)
             }
-            Divider()
-            StatusBar(model: model, session: session)
-        }
-        .background(Color(nsColor: Style.editorBackground))
-        .toolbar { toolbarContent }
-        .sheet(isPresented: $isEditingTitlePage) {
-            TitlePageInspector(model: model)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .showTitlePageInspector)) { _ in
-            isEditingTitlePage = true
-        }
-        .onChange(of: model.text) { _, _ in
-            document.noteTextEdited()
-        }
-        .onChange(of: selection) { _, target in
-            // Selecting in the sidebar moves the caret, which is what makes the
-            // list a navigator rather than a read-only outline.
-            guard let offset = target?.sourceOffset(in: model.script) else { return }
-            session.jump(to: offset)
         }
     }
 
@@ -118,6 +135,17 @@ struct RootView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            Picker("", selection: $model.workspace) {
+                ForEach(WorkspaceMode.allCases, id: \.self) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .accessibilityIdentifier("workspace.mode")
+        }
         ToolbarItem(placement: .navigation) {
             Toggle(isOn: $model.showsOutline) {
                 Label("Scenes", systemImage: "sidebar.left")

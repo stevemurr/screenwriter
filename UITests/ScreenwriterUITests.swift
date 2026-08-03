@@ -121,9 +121,50 @@ final class ScreenwriterUITests: XCTestCase {
         )
     }
 
+    func testBoardModeShowsColumnsOfScenes() {
+        let editor = newDocument()
+        editor.typeText("""
+        # Act One
+
+        ## Arrival
+
+        INT. GLASS HOUSE - NIGHT
+
+        Rain needles the windows.
+
+        ## The Test
+
+        INT. KITCHEN - PRE-DAWN
+
+        A kettle whistles.
+
+        """)
+        XCTAssertTrue(app.staticTexts["INT. KITCHEN - PRE-DAWN"].waitForExistence(timeout: 10))
+
+        app.radioButtons["Board"].click()
+        XCTAssertTrue(
+            app.scrollViews["board.columns"].waitForExistence(timeout: 10),
+            "Board mode should show the sequence columns."
+        )
+        // Columns come from the ## sequences, and every scene lands on a card.
+        XCTAssertTrue(app.staticTexts["ARRIVAL"].exists)
+        XCTAssertTrue(app.staticTexts["THE TEST"].exists)
+    }
+
+    func testSwitchingBackToWriteRestoresTheEditor() {
+        let editor = newDocument()
+        editor.typeText("INT. A - DAY\n\nHe waits.\n")
+        XCTAssertTrue(app.staticTexts["INT. A - DAY"].waitForExistence(timeout: 10))
+
+        app.radioButtons["Board"].click()
+        XCTAssertTrue(app.scrollViews["board.columns"].waitForExistence(timeout: 10))
+        app.radioButtons["Write"].click()
+        XCTAssertTrue(app.textViews["editor.surface"].waitForExistence(timeout: 10))
+    }
+
     func testPreviewPaneCanBeHidden() {
         _ = newDocument()
-        let preview = app.scrollViews["preview.continuous"]
+        let preview = app.scrollViews["preview.pages"]
         XCTAssertTrue(preview.waitForExistence(timeout: 10))
         app.checkBoxes["toggle.preview"].click()
         XCTAssertFalse(preview.exists)

@@ -43,6 +43,7 @@ public final class ScreenplayModel {
     public private(set) var replacementToken: UInt64 = 0
 
     public var mode: EditorMode = .plainText
+    public var workspace: WorkspaceMode = .write
     public var showsPreview = true
     public var showsOutline = true
     public var showsInspector = false
@@ -249,5 +250,64 @@ extension ScreenplayModel {
     /// Scene lengths keyed by scene index, for the sidebar.
     public var sceneMetrics: [Int: SceneMetric] {
         Dictionary(uniqueKeysWithValues: (paginated?.scenes ?? []).map { ($0.sceneIndex, $0) })
+    }
+}
+
+/// The workspace layouts from the mockups.
+///
+/// The three mockups drew three different segmented controls, conflating two
+/// ideas: which tools are on screen, and which panes are open. Only the first is
+/// a mode. The sidebar, preview, and inspector stay independent toggles.
+public enum WorkspaceMode: String, CaseIterable, Sendable {
+    /// Scenes, source, preview — the writing layout.
+    case write
+    /// The beat board: sequence columns of draggable scene cards.
+    case board
+    /// Adds the production inspector to the writing layout.
+    case production
+
+    public var title: String {
+        switch self {
+        case .write: return "Write"
+        case .board: return "Board"
+        case .production: return "Production"
+        }
+    }
+}
+
+extension ScreenplayModel {
+    /// Applies a scene move as one undoable step.
+    ///
+    /// Registered against the document's undo manager rather than the text
+    /// view's, because a drag happens on the board where the text view is not
+    /// even on screen. One registration means ⌘Z puts both the text and the
+    /// board back in a single press, which is what the plan called for.
+    public func apply(
+        _ edit: SceneReorder.Edit,
+        undoManager: UndoManager?,
+        actionName: String = "Move Scene"
+    ) {
+        let before = text
+        let after = SceneReorder.apply(edit, to: before)
+        guard after != before else { return }
+
+        undoManager?.registerUndo(withTarget: self) { model in
+            model.replaceText(before, undoManager: undoManager, actionName: actionName)
+        }
+        undoManager?.setActionName(actionName)
+        text = after
+        // The board reads scenes and metadata straight after a drop, so the
+        // parse cannot be left to the debounce here.
+        reparseNow()
+    }
+
+    private func replaceText(_ value: String, undoManager: UndoManager?, actionName: String) {
+        let before = text
+        undoManager?.registerUndo(withTarget: self) { model in
+            model.replaceText(before, undoManager: undoManager, actionName: actionName)
+        }
+        undoManager?.setActionName(actionName)
+        text = value
+        reparseNow()
     }
 }

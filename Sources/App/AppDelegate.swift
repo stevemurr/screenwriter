@@ -66,6 +66,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         frontmostModel?.mode = .styled
     }
 
+    @objc func showWriteMode(_ sender: Any?) { frontmostModel?.workspace = .write }
+    @objc func showBoardMode(_ sender: Any?) { frontmostModel?.workspace = .board }
+    @objc func showProductionMode(_ sender: Any?) {
+        frontmostModel?.workspace = .production
+        frontmostModel?.showsInspector = true
+    }
+
     @objc func showTitlePage(_ sender: Any?) {
         guard frontmostModel != nil else { return }
         NotificationCenter.default.post(name: .showTitlePageInspector, object: nil)
