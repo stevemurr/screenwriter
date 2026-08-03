@@ -53,6 +53,16 @@ final class WorkspaceRenderCostTests: XCTestCase {
         return source
     }
 
+    /// Hosts a view in a real window, because SwiftUI does not evaluate bodies
+    /// for a view that is not in one.
+    ///
+    /// **Put the window away with `orderOut(nil)`, never `close()`.**
+    /// `NSWindow.isReleasedWhenClosed` defaults to `true` for a window created
+    /// in code, so `close()` releases it while ARC still holds this reference
+    /// and the test host dies — as an "unexpected exit" with no assertion, no
+    /// backtrace and no crash log, several seconds after the test body has
+    /// finished and printed its results. It looks nothing like an over-release
+    /// and everything like a hang in whatever was hosted.
     private func hostWindow<V: View>(_ view: V, width: CGFloat) -> (NSWindow, NSHostingView<V>) {
         let hosting = NSHostingView(rootView: view)
         hosting.frame = NSRect(x: 0, y: 0, width: width, height: 900)
@@ -497,5 +507,129 @@ final class WorkspaceRenderCostTests: XCTestCase {
         #else
         throw XCTSkip("The render counters are Debug-only.")
         #endif
+    }
+}
+
+// MARK: - A caret move must not rebuild the workspace
+
+@MainActor
+extension WorkspaceRenderCostTests {
+
+    /// Moving the caret must invalidate the panes that follow it and nothing
+    /// else.
+    ///
+    /// `FountainEditorSession` is `@Observable` with its whole surface state in
+    /// one stored property, so any read of `session.state` inside a body
+    /// subscribes that body to every caret movement — including the ones that
+    /// only changed `caretColumn`. `RootView.body` used to hold two such reads,
+    /// for the preview's page and the inspector's scene. The cost was not those
+    /// two computations, which are a binary search and a scene lookup. It was
+    /// everything else in that body running alongside them: the sidebar's
+    /// inputs, `model.sceneMetrics` building a 95-entry dictionary, the editor
+    /// pane, the toolbar.
+    ///
+    /// Both halves are asserted. The workspace must not rebuild, *and* the
+    /// caret-following panes must — otherwise this passes just as well when the
+    /// caret move never arrived, which is the failure mode a counter-based test
+    /// is most likely to have.
+    ///
+    /// Measured by putting the old shape back and running this test against it,
+    /// rather than by inferring: one caret move inside a page went from
+    /// **7.67ms to 3.27ms** of CPU with the whole workspace hosted, Debug, and
+    /// `RootView.body` from 1 evaluation to 0. The counter is the real
+    /// regression detector — it is exact, and it names the cause. The budget
+    /// below is a loose backstop for a change that keeps the body count at zero
+    /// while making the panes themselves expensive.
+    func testMovingTheCaretDoesNotRebuildTheWorkspace() throws {
+        let document = ScreenplayDocument()
+        document.model.load(TypingWorkload.script)
+        document.model.reparseNow()
+        document.model.showsPreview = true
+        document.model.showsInspector = true
+
+        let session = FountainEditorSession()
+        let (window, hosting) = hostWindow(
+            RootView(model: document.model, document: document, session: session),
+            width: 1400
+        )
+        defer { window.orderOut(nil) }
+        flush(hosting)
+
+        // Two offsets inside the same scene and the same page, so nothing the
+        // panes derive from the caret actually changes either.
+        let scene = try XCTUnwrap(document.model.script.scenes.dropFirst(2).first)
+        let paginated = try XCTUnwrap(document.model.paginated)
+        let start = scene.range.location + 4
+        let nearby = scene.range.location + 5
+        XCTAssertEqual(
+            paginated.pageIndex(forSourceOffset: start),
+            paginated.pageIndex(forSourceOffset: nearby),
+            "the two offsets must share a page for this to be the case under test"
+        )
+
+        // Warm up first. The editor surface lays out 91 KB of TextKit on its
+        // first display, which the suite header warns costs ~50ms — more than
+        // everything under test put together. Measuring the *second* caret move
+        // measures the caret move.
+        for offset in [start, nearby, start] {
+            session.state.selectedRanges = [NSRange(location: offset, length: 0)]
+            session.state.caretColumn += 1
+            hosting.layoutSubtreeIfNeeded()
+            hosting.displayIfNeeded()
+        }
+
+        RenderCounters.reset()
+        let cost = Self.cpuMilliseconds {
+            session.state.selectedRanges = [NSRange(location: nearby, length: 0)]
+            session.state.caretColumn += 1
+            hosting.layoutSubtreeIfNeeded()
+            hosting.displayIfNeeded()
+        }
+
+        XCTAssertEqual(
+            RenderCounters.workspaceBodies, 0,
+            "RootView.body ran \(RenderCounters.workspaceBodies) time(s) for a caret move. "
+                + "Something in it is reading session.state again."
+        )
+        XCTAssertGreaterThan(
+            RenderCounters.caretFollowerBodies, 0,
+            "no caret-following pane re-rendered, so this test proved nothing."
+        )
+        XCTAssertEqual(
+            RenderCounters.outlineTreeBuilds, 0,
+            "the outline tree was rebuilt for a caret move."
+        )
+        XCTAssertLessThan(
+            cost, 6.0,
+            "a caret move cost \(String(format: "%.2f", cost))ms of SwiftUI CPU."
+        )
+    }
+
+    /// The companion: a real edit *must* still rebuild the workspace.
+    ///
+    /// Without this, the test above is satisfied by a `RootView` that never
+    /// updates at all.
+    func testAReparseStillRebuildsTheWorkspace() throws {
+        let document = ScreenplayDocument()
+        document.model.load(TypingWorkload.script)
+        document.model.reparseNow()
+
+        let (window, hosting) = hostWindow(
+            RootView(model: document.model, document: document),
+            width: 1400
+        )
+        defer { window.orderOut(nil) }
+        flush(hosting)
+
+        RenderCounters.reset()
+        document.model.text += "\n\nINT. A NEW ROOM - DAY\n\nShe arrives.\n"
+        document.model.reparseNow()
+        hosting.layoutSubtreeIfNeeded()
+        hosting.displayIfNeeded()
+
+        XCTAssertGreaterThan(
+            RenderCounters.workspaceBodies, 0,
+            "an edit did not rebuild the workspace, so the scoping went too far."
+        )
     }
 }

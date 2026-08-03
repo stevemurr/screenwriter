@@ -13,13 +13,46 @@ struct RootView: View {
     @Bindable var model: ScreenplayModel
     let document: ScreenplayDocument
 
-    @State private var session = FountainEditorSession()
+    @State private var session: FountainEditorSession
     @State private var selection: OutlineSelection?
     @State private var isEditingTitlePage = false
     @AppStorage(PrefKey.editorFontSize) private var editorFontSize = EditorTypeSize.default
 
+    /// `session` is injectable so a test can move the caret from outside and
+    /// watch what re-renders. Owning it as `@State` is otherwise correct — it is
+    /// per-window UI state, not document state — but it also makes the one
+    /// invariant worth testing here untestable, because nothing outside can
+    /// write to it. The default keeps every production call site unchanged.
+    @MainActor
+    init(
+        model: ScreenplayModel,
+        document: ScreenplayDocument,
+        session: FountainEditorSession? = nil
+    ) {
+        self.model = model
+        self.document = document
+        _session = State(initialValue: session ?? FountainEditorSession())
+    }
+
+    /// Deliberately free of any read of `session.state`.
+    ///
+    /// `FountainEditorSession` is `@Observable` and its whole surface state is
+    /// one stored property, so *any* read of `session.state` here — a caret
+    /// offset, a line number — subscribes this body to every caret movement.
+    /// This body is expensive to run: it constructs the sidebar's inputs, which
+    /// includes `model.sceneMetrics` building a 95-entry dictionary. None of
+    /// that can change when the caret moves.
+    ///
+    /// So the two panes that genuinely follow the caret read it themselves, in
+    /// their own bodies, and the caret-derived values that used to be computed
+    /// here have moved with them. Arrowing through the script now invalidates
+    /// `PreviewPane`, `InspectorPane` and `StatusBar` and nothing else. See
+    /// `WorkspaceRenderCostTests.testMovingTheCaretDoesNotRebuildTheWorkspace`.
     var body: some View {
-        VStack(spacing: 0) {
+        #if DEBUG
+        RenderCounters.workspaceBodies += 1
+        #endif
+        return VStack(spacing: 0) {
             workspaceLayout
             Divider()
             StatusBar(model: model, session: session)
@@ -97,7 +130,7 @@ struct RootView: View {
 
             if model.showsInspector {
                 Divider()
-                SceneInspector(model: model, sceneIndex: selectedSceneIndex)
+                InspectorPane(model: model, session: session, selection: selection)
                     .frame(width: Style.inspectorWidth)
             }
         }
@@ -121,9 +154,9 @@ struct RootView: View {
 
             if model.showsPreview {
                 Divider()
-                PagePreview(
+                PreviewPane(
                     paginated: model.paginated,
-                    caretPage: caretPage,
+                    session: session,
                     showsPages: $model.previewShowsPages
                 )
                 .frame(minWidth: Style.previewMinimumWidth)
@@ -131,29 +164,10 @@ struct RootView: View {
 
             if model.showsInspector {
                 Divider()
-                SceneInspector(model: model, sceneIndex: selectedSceneIndex)
+                InspectorPane(model: model, session: session, selection: selection)
                     .frame(width: Style.inspectorWidth)
             }
         }
-    }
-
-    /// The scene the inspector describes: whatever is selected in the sidebar,
-    /// falling back to whichever scene the caret sits in.
-    private var selectedSceneIndex: Int? {
-        if case .scene(let index) = selection { return index }
-        return model.script.scene(at: caretOffset)?.index
-    }
-
-    private var caretOffset: Int {
-        session.state.selectedRanges.first?.location ?? 0
-    }
-
-    /// Resolved here rather than inside the preview so that the preview's inputs
-    /// only change when the page does. A binary search over 86 pages costs
-    /// nothing; handing the pane a raw offset cost it a whole body evaluation
-    /// and an animated scroll on every keystroke.
-    private var caretPage: Int? {
-        model.paginated?.pageIndex(forSourceOffset: caretOffset)
     }
 
     private var editorPane: some View {
@@ -243,6 +257,64 @@ struct RootView: View {
             .help("Edit the title page")
             .accessibilityIdentifier("toolbar.titlepage")
         }
+    }
+}
+
+/// The preview, resolving the caret's page inside its own body.
+///
+/// Two separate reductions, and both are needed:
+///
+/// - Reading `session.state` **here** rather than in `RootView.body` keeps a
+///   caret move from invalidating the sidebar, the editor pane and the
+///   inspector along with it.
+/// - Handing `PagePreview` a *page index* rather than a raw offset keeps the
+///   preview itself still while the caret moves within a page. That was the
+///   visible bug: the pane snapped to the top of the current page on every
+///   keystroke, so the foot of a page could not be read while typing into it.
+///   The binary search costs nothing; passing the offset through cost a body
+///   evaluation over all 86 pages and an animated scroll.
+private struct PreviewPane: View {
+    let paginated: PaginatedScript?
+    let session: FountainEditorSession
+    @Binding var showsPages: Bool
+
+    var body: some View {
+        #if DEBUG
+        RenderCounters.caretFollowerBodies += 1
+        #endif
+        return PagePreview(
+            paginated: paginated,
+            caretPage: paginated?.pageIndex(
+                forSourceOffset: session.state.selectedRanges.first?.location ?? 0
+            ),
+            showsPages: $showsPages
+        )
+    }
+}
+
+/// The scene inspector, resolving which scene it describes inside its own body.
+///
+/// The scene is whatever is selected in the sidebar, falling back to whichever
+/// scene the caret sits in — which is why this has to read the caret, and why it
+/// reads it here. Moving the caret within one scene leaves `sceneIndex`
+/// unchanged, so `SceneInspector` itself does not re-render.
+private struct InspectorPane: View {
+    @Bindable var model: ScreenplayModel
+    let session: FountainEditorSession
+    let selection: OutlineSelection?
+
+    var body: some View {
+        #if DEBUG
+        RenderCounters.caretFollowerBodies += 1
+        #endif
+        return SceneInspector(model: model, sceneIndex: sceneIndex)
+    }
+
+    private var sceneIndex: Int? {
+        if case .scene(let index) = selection { return index }
+        return model.script.scene(
+            at: session.state.selectedRanges.first?.location ?? 0
+        )?.index
     }
 }
 

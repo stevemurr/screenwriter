@@ -25,6 +25,15 @@ enum RenderCounters {
     nonisolated(unsafe) static var previewScrolls = 0
     /// `PagePreview.body` evaluations.
     nonisolated(unsafe) static var previewBodies = 0
+    /// `RootView.body` evaluations — the whole workspace tree. This one is the
+    /// expensive body: it constructs every pane's inputs, `model.sceneMetrics`
+    /// among them. It must not run when only the caret has moved.
+    nonisolated(unsafe) static var workspaceBodies = 0
+    /// `PreviewPane.body` + `InspectorPane.body` — the two panes that read the
+    /// caret. Counted so a test asserting the workspace did *not* rebuild can
+    /// also show that the caret move was observed by something, rather than
+    /// passing because nothing happened at all.
+    nonisolated(unsafe) static var caretFollowerBodies = 0
 
     static func reset() {
         outlineTreeBuilds = 0
@@ -32,6 +41,8 @@ enum RenderCounters {
         boardLayoutBuilds = 0
         previewScrolls = 0
         previewBodies = 0
+        workspaceBodies = 0
+        caretFollowerBodies = 0
     }
 }
 #endif
