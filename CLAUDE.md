@@ -7,6 +7,13 @@ format git and Syncthing can actually read.
 
 ## Build & Run
 
+When a UI test fails on a lookup, attach `app.debugDescription` and dump every
+static text with its identifier (see `testDumpAccessibilityTree`) rather than
+guessing at the query. One instrumented run answered what four fix-and-rerun
+attempts did not. And when a fix does not take, check the fix actually landed
+before forming the next hypothesis — a revert that only reverted the test side
+cost three runs of debugging code that had never changed.
+
 ```bash
 # Engine tests — seconds, no Xcode
 swift test --package-path Packages/FountainKit
@@ -110,7 +117,36 @@ event and no document window is ever created. SwiftUI still draws every view,
 inside `NSHostingView` under an AppKit window. The menu bar is built in
 `MainMenu.swift` because there is no NIB and no scene to generate one.
 
-### Rule 9: Parse leniently, lint loudly
+### Rule 9: An `NSViewRepresentable`'s inner view needs its own accessibility identity
+`.accessibilityIdentifier` in SwiftUI labels the *wrapper*. The `NSTextView`
+inside stays anonymous and is not in the accessibility tree at all, because
+AppKit does not expose a TextKit 2 document view beneath a scroll view on its
+own. Set the identifier and role on the view itself and make the host an
+explicit group whose sole child is the editor — see `EditorHostView`. This is
+covered by `EditorAccessibilityTests`, which runs on the host in milliseconds;
+finding it through the VM cost a five-minute round trip.
+
+### Rule 10: `.accessibilityIdentifier` on a SwiftUI `Text` erases its label
+The status bar's readouts expose their identifiers and an **empty** label, and
+adding an explicit `.accessibilityLabel` does not restore it. So a UI test can
+never match those by their text, and VoiceOver announces nothing. Assert on the
+sidebar's scene rows instead, which do carry their headings. If a status readout
+ever has to be assertable, verify with `app.debugDescription` first rather than
+assuming the identifier is enough.
+
+### Rule 11: UI tests use the window the app opens at launch
+Do not press ⌘N. Launch already opens one untitled screenplay, and a second
+window means two status bars and two of everything else to match against.
+Suppressing the launch document under test is worse still: with no window the
+app never becomes active, so a later ⌘N window never takes key focus and
+everything typed into it is silently lost.
+
+### Rule 12: A window command must name the document it is for
+Menu actions reach documents by posting a notification. Post it with the target
+`ScreenplayModel` as the object and check it on receipt. A nil object reaches
+every open `RootView`, so one ⌘⇧T opened a title-page sheet on every window.
+
+### Rule 13: Parse leniently, lint loudly
 Real scripts contain en-dash sluglines, lowercase headings, headings with no
 trailing period, parentheticals on the cue line, and `.`/`>` used as generic
 force marks. The parser accepts all of it. Ambiguity is reported by the lint

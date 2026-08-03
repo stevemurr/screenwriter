@@ -378,11 +378,15 @@ struct CorpusGoldenTests {
             .sluglineAsSection: 0,             // 42 in the six Trophy Boyz `.highland` episodes
             .sceneHeadingEnDash: 4,            // `EXT. MOUNTAIN – MORNING`, 2 files
             .ambiguousForcedMark: 38,          // 14 `.` + 24 `>`, mostly Ergosphere
-            .lowercaseSceneHeading: 4,         // `INT. NEEL's WORK`, `INT. Horace apartment desk`
+            // Was 4. Two of them — `INT. NEEL's WORK` and its BREAK ROOM twin —
+            // were fixed in the corpus itself by clicking Fix in the app, which
+            // is the rule working rather than the rule changing.
+            .lowercaseSceneHeading: 2,         // `INT. Horace apartment desk`
             .sceneHeadingSeparator: 1,         // `I/E MONTAGE IMAGE - CHRIS BACKGROUND`
             .trailingWhitespaceOnCue: 424,     // the Markdown hard-break artifact
             .duplicateSceneNumber: 0,          // no collision anywhere in the library
-            .sceneHeadingNeedsBlankLine: 25    // headings glued to a `## Beat n:` line
+            // Was 25; one glued heading in Rebase was fixed the same way.
+            .sceneHeadingNeedsBlankLine: 24    // headings glued to a `## Beat n:` line
         ]
 
         for rule in LintRule.allCases {
@@ -395,6 +399,6 @@ struct CorpusGoldenTests {
                 """
             )
         }
-        #expect(totals.values.reduce(0, +) == 496)
+        #expect(totals.values.reduce(0, +) == 493)
     }
 }
