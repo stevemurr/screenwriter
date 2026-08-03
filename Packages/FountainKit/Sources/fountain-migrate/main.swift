@@ -3,10 +3,10 @@ import FountainKit
 
 // Batch tool over a tree of screenplays.
 //
-// `report` works today and is how the parser is checked against the real corpus
-// without launching the app. `migrate` (M2) converts `.highland` bundles into
-// `.screenplay` packages; the Highland side is read-only by design, so the
-// originals are never opened for writing.
+// `report` is how the parser is checked against the real corpus without
+// launching the app. `migrate` converts `.highland` bundles into `.screenplay`
+// packages; the Highland side is read-only by design, so the originals are
+// never opened for writing.
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 
@@ -15,16 +15,28 @@ func usage() -> Never {
     usage: fountain-migrate <command> [options] <path>
 
     commands:
-      report <path>     Parse every .fountain under <path> and print a summary.
+      report <path>              Parse every .fountain under <path> and summarise.
+      profile <file>             Time the parser on one script.
+      migrate [options] <path>   Convert Highland documents into .screenplay
+                                 packages, next to the originals.
 
-    options:
-      --dry-run         Report what would change without writing anything.
+    migrate options:
+      --dry-run          Print exactly what would be written, and write nothing.
+                         Start here — every run without it writes files.
+      --plain            Write a bare .fountain file instead of a .screenplay
+                         package. Loses every sidecar the bundle carried.
+      --keep-revisions   Carry Highland's revisions/current.json across. It is a
+                         base64 NSKeyedArchiver blob, dropped by default.
+
+    <path> may be one file or a tree. Existing output is never overwritten —
+    it is skipped and reported. `.highland` originals are only ever read.
 
     """.utf8))
     exit(2)
 }
 
 guard let command = arguments.first else { usage() }
+let flags = Set(arguments.filter { $0.hasPrefix("--") })
 let paths = arguments.dropFirst().filter { !$0.hasPrefix("--") }
 guard let root = paths.first else { usage() }
 
@@ -100,8 +112,143 @@ case "profile":
     """)
 
 case "migrate":
-    FileHandle.standardError.write(Data("migrate lands in M2 — see the plan.\n".utf8))
-    exit(1)
+    // Reads `.highland` and loose `.fountain`, writes `.screenplay` beside them.
+    // Rule 6: the only call made against a `.highland` is `Data(contentsOf:)`.
+    let dryRun = flags.contains("--dry-run")
+    let plain = flags.contains("--plain")
+    let keepRevisions = flags.contains("--keep-revisions")
+    let outputExtension = plain ? "fountain" : "screenplay"
+
+    let rootURL = URL(fileURLWithPath: (root as NSString).expandingTildeInPath)
+    var sources: [URL] = []
+    var isDirectory: ObjCBool = false
+    FileManager.default.fileExists(atPath: rootURL.path, isDirectory: &isDirectory)
+
+    if isDirectory.boolValue {
+        let enumerator = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        )
+        while let url = enumerator?.nextObject() as? URL {
+            if ["highland", "fountain"].contains(url.pathExtension) { sources.append(url) }
+        }
+        // Grouped by output name, `.highland` first: `Clean Break/` holds both
+        // `Clean Break.highland` and `Clean Break.fountain`, and the bundle is
+        // the richer source — it brings every sidecar with it.
+        sources.sort {
+            let left = $0.deletingPathExtension().path
+            let right = $1.deletingPathExtension().path
+            if left != right { return left < right }
+            return $0.pathExtension == "highland"
+        }
+    } else {
+        sources = [rootURL]
+    }
+
+    print(dryRun
+        ? "dry run — reading \(sources.count) file(s), writing nothing"
+        : "writing .\(outputExtension) beside \(sources.count) source file(s)")
+    print("")
+
+    var converted = 0
+    var skipped: [(String, String)] = []
+    var failed: [(String, String)] = []
+    var legacy = 0
+    var current = 0
+    var revisionBytesDropped = 0
+    // A dry run has to predict the real run exactly, and two sources can want
+    // the same output: `Clean Break/` holds both `Clean Break.highland` and
+    // `Clean Break.fountain`. Without this the dry run promises 2 conversions
+    // and the real run does 1 and skips 1.
+    var claimed: Set<String> = []
+
+    /// Left-aligned to a fixed width so the columns line up over 59 rows.
+    func column(_ text: String, _ width: Int) -> String {
+        text.count >= width ? text : text + String(repeating: " ", count: width - text.count)
+    }
+
+    for source in sources {
+        let name = source.lastPathComponent
+        let output = source.deletingPathExtension().appendingPathExtension(outputExtension)
+
+        if output == source {
+            skipped.append((name, "already .\(outputExtension)"))
+            continue
+        }
+        if FileManager.default.fileExists(atPath: output.path) {
+            skipped.append((name, "\(output.lastPathComponent) already exists"))
+            continue
+        }
+        if !claimed.insert(output.path).inserted {
+            skipped.append((name, "another source already claims \(output.lastPathComponent)"))
+            continue
+        }
+
+        do {
+            let bundle: TextBundle
+            var note = ""
+            if source.pathExtension == "highland" {
+                let result = try HighlandBundle(contentsOf: source)
+                    .imported(keepingOpaqueState: keepRevisions)
+                bundle = result.bundle
+                if result.generation == .legacy { legacy += 1 } else { current += 1 }
+                revisionBytesDropped += result.droppedBytes
+                note = "\(column(result.bundle.textFileName, 14))"
+                    + "\(column(result.generation.rawValue, 8))"
+                    + String(format: "%3d extras", result.bundle.extras.count)
+                if result.droppedBytes > 0 {
+                    note += String(format: "  −%d KB revisions", result.droppedBytes / 1024)
+                }
+                for problem in result.unreadable {
+                    note += "\n      !! \(problem.path): \(problem.reason)"
+                }
+            } else {
+                let text = try String(contentsOf: source, encoding: .utf8)
+                bundle = TextBundle(text: text)
+                note = column("text.fountain", 14) + column("plain", 8)
+            }
+
+            if !dryRun {
+                if plain {
+                    try Data(bundle.text.utf8).write(to: output, options: .withoutOverwriting)
+                } else {
+                    try bundle.directoryWrapper().write(
+                        to: output,
+                        options: .atomic,
+                        originalContentsURL: nil
+                    )
+                }
+            }
+            converted += 1
+            print("  \(column(name, 44)) → \(column(output.lastPathComponent, 40)) \(note)")
+        } catch {
+            // Release the name so a sibling source can still take it.
+            claimed.remove(output.path)
+            failed.append((name, error.localizedDescription))
+        }
+    }
+
+    if !skipped.isEmpty {
+        print("\nskipped:")
+        for (name, reason) in skipped { print("  \(column(name, 44)) \(reason)") }
+    }
+    if !failed.isEmpty {
+        print("\nfailed:")
+        for (name, reason) in failed { print("  \(column(name, 44)) \(reason)") }
+    }
+
+    print("""
+
+    \(converted) \(dryRun ? "would convert" : "converted") · \(skipped.count) skipped · \
+    \(failed.count) failed
+    \(legacy) legacy-layout bundles · \(current) current-layout bundles · \
+    \(revisionBytesDropped / 1024) KB of Highland revision state dropped
+    """)
+    if dryRun && converted > 0 {
+        print("nothing was written — re-run without --dry-run to migrate")
+    }
+    exit(failed.isEmpty ? 0 : 1)
 
 default:
     usage()
