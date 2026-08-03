@@ -46,8 +46,8 @@ struct PaginateScalingTests {
         return text
     }
 
-    @Test("Splitting one tall block across many pages does not go quadratic")
-    func splittingIsNotQuadratic() {
+    @Test("Splitting one tall block across many pages stays off the cliff")
+    func splittingStaysOffTheCliff() {
         let small = ScriptParser.parse(Self.speech(lines: 100))
         let large = ScriptParser.parse(Self.speech(lines: 800))
         #expect(Paginator.paginate(small).pageCount == 4)
@@ -57,19 +57,21 @@ struct PaginateScalingTests {
         let largeTime = Self.fastest { _ = Paginator.paginate(large) }
         let growth = largeTime / smallTime
 
-        // Eight times the input. A cliff guard, not a proof of linearity: the
-        // re-wrap of a carried tail is still quadratic in the height of the
-        // block, and closing that would mean threading a row limit through
+        // Eight times the input. A cliff guard, and named as one — this test
+        // used to claim it proved the split was not quadratic, which was wrong
+        // in both directions. The shape it replaced was *cubic*: `split` asked
+        // `keptRows` (a linear scan of the block's rows) once per candidate
+        // boundary, scanned every candidate in the block rather than stopping
+        // at the foot of the page, and did that once per page the block spans —
+        // O(rows) x O(rows) x O(pages). What is left is quadratic: candidates
+        // are now bounded by the page, but the re-wrap of a carried tail still
+        // scans the tail. Closing that would mean threading a row limit through
         // `LineWrap.wrap` for a shape no script in the library contains.
         //
-        // What this does catch is the cliff that was there. `split` asked
-        // `keptRows` — a linear scan of the block's rows — once per candidate
-        // boundary, and scanned every candidate in the block rather than
-        // stopping at the foot of the page. Growth over these two inputs,
-        // measured on this machine: **66x optimised and 281x unoptimised**
-        // before, **32x and 34x** after. 48 is the only budget that separates
-        // them in both configurations, so it is deliberately snug — retune it
-        // against all four numbers, not against one.
+        // Growth over these two inputs, measured on this machine: **66x
+        // optimised and 281x unoptimised** before, **32x and 34x** after. 48 is
+        // the only budget that separates them in both configurations, so it is
+        // deliberately snug — retune it against all four numbers, not one.
         let growthText = String(format: "%.1f", growth)
         #expect(
             growth < 48,
@@ -77,7 +79,7 @@ struct PaginateScalingTests {
             Eight times the block took \(growthText)x the time \
             (\(String(format: "%.2f", smallTime))ms → \
             \(String(format: "%.2f", largeTime))ms). \
-            Splitting a block across a page has gone quadratic again.
+            Splitting a block across a page has hit the cliff again.
             """
         )
     }

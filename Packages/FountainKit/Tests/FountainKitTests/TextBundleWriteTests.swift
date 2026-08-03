@@ -225,8 +225,10 @@ struct TextBundleWriteTests {
     /// thread mid-save. No archive in the reference library does this today.
     ///
     /// Swift cannot catch an ObjC exception in-process, so the raise itself is
-    /// not asserted here. The order that *doesn't* raise is, because losing a
-    /// folder silently is the same defect with a quieter failure mode.
+    /// asserted separately, in a child process, by
+    /// `theOldShapeAbortsOnTheOtherOrder`. This one takes the order that
+    /// *doesn't* raise, because losing a folder silently is the same defect
+    /// with a quieter failure mode.
     @Test("A path that is both a file and a folder resolves to the folder")
     func fileAndFolderCollision() throws {
         let bundle = TextBundle(
@@ -307,5 +309,48 @@ struct TextBundleWriteTests {
         }
         #expect(checked >= 50, "Only \(checked) bundles round-tripped.")
         #expect(nested >= 20, "Only \(nested) bundles exercised a nested path.")
+    }
+
+    /// The same collision in the other order, which aborts the process.
+    ///
+    /// Run as an exit test, so the abort happens in a child process and this
+    /// suite survives it. That is the only way to assert on it: an uncaught
+    /// `NSInternalInconsistencyException` unwinds into `std::terminate` and
+    /// `abort()`, and Swift has no `@catch`.
+    ///
+    /// Which order a save takes is decided by `Dictionary` iteration, so this is
+    /// not the unlucky case — it is half the cases. Measured on the shape this
+    /// replaced, over 20 runs of the same two-entry bundle: **12 aborted, 8
+    /// silently dropped the folder.** Neither is a save.
+    @Test("The shape it replaced aborts the process on the other order")
+    func theOldShapeAbortsOnTheOtherOrder() async {
+        await #expect(processExitsWith: .signal(SIGABRT)) {
+            func legacyInsert(
+                _ wrapper: FileWrapper,
+                named name: String,
+                path: [String],
+                into children: inout [String: FileWrapper]
+            ) {
+                guard let head = path.first else {
+                    wrapper.preferredFilename = name
+                    children[name] = wrapper
+                    return
+                }
+                // `bin` is a regular file by now, and `-[NSFileWrapper
+                // fileWrappers]` is directory-only. Optional chaining is no
+                // protection: the wrapper is not nil, it is the wrong kind.
+                var nested = children[head]?.fileWrappers ?? [:]
+                legacyInsert(wrapper, named: name, path: Array(path.dropFirst()), into: &nested)
+                let directory = FileWrapper(directoryWithFileWrappers: nested)
+                directory.preferredFilename = head
+                children[head] = directory
+            }
+
+            var children: [String: FileWrapper] = [:]
+            legacyInsert(FileWrapper(regularFileWithContents: Data([1])),
+                         named: "bin", path: [], into: &children)
+            legacyInsert(FileWrapper(regularFileWithContents: Data([2])),
+                         named: "9.txt", path: ["bin"], into: &children)
+        }
     }
 }

@@ -279,6 +279,56 @@ final class TypingCostTests: XCTestCase {
                 + "for an entire keystroke now — so the LineIndex build was not the cost after all."
         )
     }
+
+    // MARK: - Rule 2: the surface must hold the model's bytes, not an equal string
+
+    /// `textViewHolds` compares with `NSString.isEqual`, not Swift's `==`.
+    ///
+    /// The change was made for speed — since `emitTextIfChanged` snapshots, the
+    /// two sides have different representations, and Swift's `==` transcodes the
+    /// whole document to compare them, 4ms on the 91 KB script, on every scroll
+    /// notification and every SwiftUI update. But it also changed the *meaning*
+    /// of the comparison, and that part is load-bearing, so it is pinned here
+    /// rather than left as a side effect nobody wrote down.
+    ///
+    /// Swift's `==` is canonical equivalence: `e` + U+0301 and U+00E9 are the
+    /// same string. `NSString.isEqual` is code-unit equality: they are not. So
+    /// with a model holding one and the text view holding the other, `==` says
+    /// "the surface already has this" and leaves the two byte-different
+    /// forever, while `isEqual` says "it does not" and the surface adopts the
+    /// model's bytes.
+    ///
+    /// `isEqual` is the correct answer under Rule 2. The document that gets
+    /// saved is the model's; a surface silently holding different bytes from
+    /// the one that will be written is the exact divergence Rule 2 exists to
+    /// prevent. A writer reaches this by pasting from an app that normalises
+    /// differently — macOS filenames are decomposed, most other sources are not.
+    func testTheSurfaceAdoptsBytesThatAreOnlyCanonicallyEqual() throws {
+        let decomposed = "INT. CAFE\u{0301} - DAY\n\nShe waits.\n"
+        let precomposed = "INT. CAF\u{00C9} - DAY\n\nShe waits.\n"
+
+        // The premise: equal to Swift, different to NSString, different bytes.
+        XCTAssertEqual(decomposed, precomposed, "these must be canonically equivalent")
+        XCTAssertNotEqual(
+            Array(decomposed.utf8), Array(precomposed.utf8),
+            "these must not be byte-identical, or the test proves nothing"
+        )
+
+        let (host, _, coordinator) = makeEditor(decomposed)
+        XCTAssertTrue(coordinator.textViewHolds(decomposed))
+        XCTAssertFalse(
+            coordinator.textViewHolds(precomposed),
+            "textViewHolds compared canonically, so a byte-different document "
+                + "would be left in the surface unchanged."
+        )
+
+        coordinator.applyExternalText(precomposed, replacementToken: 0, resetUndo: false)
+        XCTAssertEqual(
+            Array(host.textView.string.utf8), Array(precomposed.utf8),
+            "the surface must hold the model's bytes exactly, not a string equal to them."
+        )
+    }
+
 }
 
 // MARK: - The snapshot
