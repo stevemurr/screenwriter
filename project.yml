@@ -1,0 +1,182 @@
+name: Screenwriter
+options:
+  bundleIdPrefix: com.stevemurr
+  deploymentTarget:
+    macOS: "27.0"
+  createIntermediateGroups: true
+configs:
+  Debug: debug
+  Release: release
+  UITest: debug
+packages:
+  FountainKit:
+    path: Packages/FountainKit
+targets:
+  Screenwriter:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+      # A folder reference, not a group: the `Fonts` directory must survive into
+      # Contents/Resources/Fonts intact, because ATSApplicationFontsPath names
+      # it. A plain group flattens the .ttf files into Resources/ and the font
+      # silently never registers.
+      - path: Resources/Fonts
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: FountainKit
+        product: FountainKit
+      - sdk: PDFKit.framework
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: Screenwriter
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        LSApplicationCategoryType: public.app-category.productivity
+        NSHumanReadableCopyright: "© 2026 Steve Murr"
+        NSPrincipalClass: NSApplication
+        NSHighResolutionCapable: true
+        # Courier Prime (SIL OFL) ships in the bundle. Highland's PDFs are set
+        # in it at 12pt/7.1904pt-per-char, so matching their output needs the
+        # real font rather than the system's Courier New.
+        ATSApplicationFontsPath: Fonts
+        CFBundleDocumentTypes:
+          # Our own package format: an *uncompressed* TextBundle. Finder shows
+          # one document; git, grep and Syncthing see plain text files.
+          - CFBundleTypeName: Screenplay
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Owner
+            LSTypeIsPackage: true
+            NSDocumentClass: $(PRODUCT_MODULE_NAME).ScreenplayDocument
+            LSItemContentTypes:
+              - com.stevemurr.screenwriter.package
+          - CFBundleTypeName: Fountain Screenplay
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Owner
+            NSDocumentClass: $(PRODUCT_MODULE_NAME).ScreenplayDocument
+            LSItemContentTypes:
+              - com.stevemurr.screenwriter.fountain
+          # Highland documents are imported, never written. Rank None so we can
+          # open one to migrate it but never contest Highland Pro's ownership.
+          - CFBundleTypeName: Highland Document
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: None
+            NSDocumentClass: $(PRODUCT_MODULE_NAME).ScreenplayDocument
+            LSItemContentTypes:
+              - com.quoteunquoteapps.highland
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.stevemurr.screenwriter.package
+            UTTypeDescription: Screenplay
+            UTTypeConformsTo:
+              - org.textbundle.package
+              - com.apple.package
+            UTTypeTagSpecification:
+              public.filename-extension: [screenplay]
+          # Nothing on macOS claims `.fountain` — it resolves to a dynamic UTI,
+          # because Highland registers the extension with no LSItemContentTypes.
+          # So we can export our own rather than squat com.quoteunquoteapps.*.
+          - UTTypeIdentifier: com.stevemurr.screenwriter.fountain
+            UTTypeDescription: Fountain Screenplay
+            UTTypeConformsTo:
+              - public.plain-text
+            UTTypeTagSpecification:
+              public.filename-extension: [fountain]
+        UTImportedTypeDeclarations:
+          # Declared verbatim as Highland Pro exports it. Imported, never
+          # exported — Highland owns this type.
+          - UTTypeIdentifier: com.quoteunquoteapps.highland
+            UTTypeDescription: Highland Document
+            UTTypeConformsTo:
+              - org.textbundle.compressed
+              - com.pkware.zip-archive
+              - public.data
+              - public.archive
+              - public.text
+            UTTypeTagSpecification:
+              public.filename-extension: [highland]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.stevemurr.screenwriter
+        MARKETING_VERSION: "1.0.0"
+        # Swift 5 language mode: the TextKit 2 editor surface is ported from
+        # topside, which is built against it. No strict-concurrency setting
+        # anywhere in this codebase — @MainActor discipline instead.
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 6237SR7A22
+        # Indirection so the VM UI-test runner can retarget entitlements from
+        # the command line without a global CODE_SIGN_ENTITLEMENTS override
+        # leaking onto the test bundles, whose runner must stay entitlement-free.
+        SCREENWRITER_ENTITLEMENTS: Generated/Screenwriter.entitlements
+        CODE_SIGN_ENTITLEMENTS: $(SCREENWRITER_ENTITLEMENTS)
+        # Sandbox off: the app reads and writes screenplays anywhere the user
+        # keeps them, and the migration tool walks whole directory trees of
+        # existing .highland files. Developer ID, not Mac App Store.
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
+      configs:
+        UITest:
+          # The ephemeral UI-test VM has no developer certificate or team
+          # provisioning profile, so this build signs ad-hoc with no
+          # entitlements.
+          SCREENWRITER_ENTITLEMENTS: ""
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "-"
+          DEVELOPMENT_TEAM: ""
+          PROVISIONING_PROFILE_SPECIFIER: ""
+  ScreenwriterTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests
+    dependencies:
+      - target: Screenwriter
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.stevemurr.screenwriter.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+  ScreenwriterUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - UITests
+    dependencies:
+      - target: Screenwriter
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.stevemurr.screenwriter.uitests
+        TEST_TARGET_NAME: Screenwriter
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+schemes:
+  # Host-safe: this scheme's test action runs unit tests only. UI tests live in
+  # their own scheme and run inside a tart VM via ~/.claude/skills/vm-uitest —
+  # XCUITest seizes the host mouse and keyboard, so never `xcodebuild test` them
+  # here.
+  Screenwriter:
+    build:
+      targets:
+        Screenwriter: all
+        ScreenwriterTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ScreenwriterTests
+  ScreenwriterUITests:
+    build:
+      targets:
+        Screenwriter: all
+        ScreenwriterUITests: [test]
+    test:
+      config: UITest
+      targets:
+        - ScreenwriterUITests

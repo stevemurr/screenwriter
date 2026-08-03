@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Deliberately empty. The App Sandbox and Hardened Runtime are both off
+	  (see project.yml), so the app needs no entitlement to read and write
+	  screenplays wherever the user keeps them, or to walk a directory tree of
+	  .highland files during migration.
+
+	  The file exists so CODE_SIGN_ENTITLEMENTS has a stable target that the
+	  UITest configuration can swap out for "" — see SCREENWRITER_ENTITLEMENTS.
+	-->
+</dict>
+</plist>
