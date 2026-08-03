@@ -198,8 +198,13 @@ private struct StatusBar: View {
 
     var body: some View {
         HStack(spacing: 16) {
+            // Identifier *and* label. Attaching `.accessibilityIdentifier` to a
+            // SwiftUI `Text` suppresses the string it would otherwise expose as
+            // its label, so these announced nothing to VoiceOver and matched
+            // nothing by label in a UI test.
             Text("Line \(session.state.caretLine), Column \(session.state.caretColumn)")
                 .accessibilityIdentifier("status.caret")
+                .accessibilityLabel("Line \(session.state.caretLine), Column \(session.state.caretColumn)")
             DiagnosticsSummary(
                 warnings: model.warningCount,
                 suggestions: model.suggestionCount,
@@ -208,11 +213,14 @@ private struct StatusBar: View {
             Spacer()
             Text("\(model.pageCount) pages")
                 .accessibilityIdentifier("status.pages")
+                .accessibilityLabel("\(model.pageCount) pages")
             Text("\(model.sceneCount) scenes")
                 .accessibilityIdentifier("status.scenes")
+                .accessibilityLabel("\(model.sceneCount) scenes")
             Text("\(model.characterCount) characters")
             Text("\(model.wordCount) words")
                 .accessibilityIdentifier("status.words")
+                .accessibilityLabel("\(model.wordCount) words")
         }
         .font(.system(size: 11))
         .foregroundStyle(.secondary)

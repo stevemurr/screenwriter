@@ -33,19 +33,17 @@ final class ScreenwriterUITests: XCTestCase {
     /// string is rendered in the sidebar footer and in the status bar — and an
     /// ambiguous query is a confusing way to fail.
     private func sceneCountEquals(_ expected: String, timeout: TimeInterval) -> Bool {
-        // Matched on label and counted, rather than resolved to one element.
-        // The string is rendered twice — sidebar footer and status bar — so a
-        // singular query is ambiguous, and an identifier put on the SwiftUI
-        // `Text` did not surface in the AX tree at all.
-        let query = app.staticTexts.matching(
-            NSPredicate(format: "label == %@", expected)
-        )
+        // By identifier, and reading its label. The status bar carries both now;
+        // the identifier alone would have matched an element whose label was
+        // empty, which is precisely the state that made this unreliable.
+        let element = app.staticTexts["status.scenes"]
+        guard element.waitForExistence(timeout: timeout) else { return false }
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if query.count > 0 { return true }
+            if element.label == expected { return true }
             usleep(200_000)
         } while Date() < deadline
-        return query.count > 0
+        return element.label == expected
     }
 
     private let sample = """
