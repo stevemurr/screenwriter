@@ -166,3 +166,41 @@ final class StyledModeLayoutTests: XCTestCase {
         }
     }
 }
+
+/// The editor's presence in the accessibility tree.
+///
+/// Every XCUITest in this project starts by finding `editor.surface`, so when
+/// that identifier went missing all nine failed on the same line — after a
+/// five-minute VM round trip. These run on the host in milliseconds and would
+/// have caught it before the VM was ever booted.
+@MainActor
+final class EditorAccessibilityTests: XCTestCase {
+
+    func testTheTextViewCarriesTheIdentifierUITestsLookFor() {
+        let host = EditorHostView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        // On the NSTextView itself. SwiftUI's `.accessibilityIdentifier` labels
+        // the NSViewRepresentable wrapper and leaves the view underneath
+        // anonymous, which is exactly the bug this asserts against.
+        XCTAssertEqual(host.textView.accessibilityIdentifier(), "editor.surface")
+        XCTAssertEqual(host.textView.accessibilityRole(), .textArea)
+        XCTAssertTrue(host.textView.isAccessibilityElement())
+    }
+
+    func testTheHostExposesTheEditorAsItsOnlyChild() {
+        // AppKit does not automatically expose a TextKit 2 document view beneath
+        // its scroll view; without this the text view is not in the AX tree at
+        // all, however well-identified it is.
+        let host = EditorHostView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        XCTAssertEqual(host.accessibilityRole(), .group)
+        let children = host.accessibilityChildren() as? [NSObject] ?? []
+        XCTAssertEqual(children.count, 1)
+        XCTAssertTrue(children.first === host.textView)
+    }
+
+    func testTheLineNumberRulerIsNotAnAccessibilityElement() {
+        // A gutter full of numbers would be noise for anything reading the
+        // document, and would give XCUITest a second thing to match.
+        let host = EditorHostView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        XCTAssertFalse(host.rulerView.isAccessibilityElement())
+    }
+}

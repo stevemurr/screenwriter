@@ -42,6 +42,16 @@ public final class EditorHostView: NSView {
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
 
+        // Set on the text view itself, not through SwiftUI. `.accessibilityIdentifier`
+        // on an NSViewRepresentable labels the SwiftUI wrapper, and the NSTextView
+        // underneath stays anonymous — so `app.textViews["editor.surface"]` never
+        // matches and every UI test fails at the same line. This is the plumbing
+        // topside had and this port dropped.
+        textView.setAccessibilityIdentifier(EditorHostView.accessibilityIdentifier)
+        textView.setAccessibilityRole(.textArea)
+        textView.setAccessibilityLabel("Fountain source")
+        textView.setAccessibilityEnabled(true)
+
         scrollView = NSScrollView(frame: .zero)
         scrollView.drawsBackground = true
         scrollView.hasVerticalScroller = true
@@ -63,7 +73,16 @@ public final class EditorHostView: NSView {
             scrollView.topAnchor.constraint(equalTo: topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
+
+        // AppKit does not automatically expose a TextKit 2 document view beneath
+        // its scroll view. Making the geometry host an explicit group whose sole
+        // semantic child is the real editor is what puts it in the AX tree.
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityChildren([textView])
     }
+
+    static let accessibilityIdentifier = "editor.surface" 
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

@@ -121,7 +121,6 @@ struct RootView: View {
                 replacementToken: model.replacementToken,
                 session: session
             )
-            .accessibilityIdentifier("editor.surface")
 
             if model.showsDiagnostics {
                 DiagnosticsPane(
