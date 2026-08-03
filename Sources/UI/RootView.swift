@@ -20,15 +20,7 @@ struct RootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if model.workspace == .board {
-                BeatBoardView(
-                    model: model,
-                    undoManager: document.undoManager,
-                    selection: $selection
-                )
-            } else {
-                writingLayout
-            }
+            workspaceLayout
             Divider()
             StatusBar(model: model, session: session)
         }
@@ -47,6 +39,22 @@ struct RootView: View {
             // Production is the writing layout with the inspector open; the
             // inspector stays an independent toggle everywhere else.
             if mode == .production { model.showsInspector = true }
+            if mode == .board {
+                // The board mock is a planning workspace: navigator, cards and
+                // selected-scene metadata belong together. They remain normal
+                // toolbar toggles after the workspace opens.
+                model.showsOutline = true
+                model.showsInspector = true
+                let hasSceneSelection: Bool
+                if case .some(.scene(let index)) = selection {
+                    hasSceneSelection = model.script.scenes.contains { $0.index == index }
+                } else {
+                    hasSceneSelection = false
+                }
+                if !hasSceneSelection, let first = model.script.scenes.first {
+                    selection = .scene(first.index)
+                }
+            }
         }
         .onChange(of: selection) { _, target in
             // Selecting in the sidebar moves the caret, which is what makes the
@@ -56,35 +64,73 @@ struct RootView: View {
         }
     }
 
-    private var writingLayout: some View {
+    @ViewBuilder
+    private var workspaceLayout: some View {
+        if model.workspace == .board {
+            boardLayout
+        } else {
+            writingLayout
+        }
+    }
+
+    private var boardLayout: some View {
         HStack(spacing: 0) {
             if model.showsOutline {
-                    OutlineSidebar(
-                        script: model.script,
-                        metrics: model.sceneMetrics,
-                        selection: $selection
-                    )
-                        .frame(width: 260)
-                    Divider()
-                }
+                OutlineSidebar(
+                    script: model.script,
+                    metrics: model.sceneMetrics,
+                    pageCount: model.pageCount,
+                    selection: $selection
+                )
+                .frame(width: Style.sidebarWidth)
+                Divider()
+            }
 
-                editorPane
-                    .frame(minWidth: 380)
-
-                if model.showsPreview {
-                    Divider()
-                    PagePreview(
-                        paginated: model.paginated,
-                        caretOffset: caretOffset,
-                        showsPages: $model.previewShowsPages
-                    )
-                    .frame(minWidth: 340)
-                }
+            BeatBoardView(
+                model: model,
+                undoManager: document.undoManager,
+                selection: $selection
+            )
+            .frame(minWidth: Style.editorMinimumWidth)
 
             if model.showsInspector {
                 Divider()
                 SceneInspector(model: model, sceneIndex: selectedSceneIndex)
-                    .frame(width: 300)
+                    .frame(width: Style.inspectorWidth)
+            }
+        }
+    }
+
+    private var writingLayout: some View {
+        HStack(spacing: 0) {
+            if model.showsOutline {
+                OutlineSidebar(
+                    script: model.script,
+                    metrics: model.sceneMetrics,
+                    pageCount: model.pageCount,
+                    selection: $selection
+                )
+                .frame(width: Style.sidebarWidth)
+                Divider()
+            }
+
+            editorPane
+                .frame(minWidth: Style.editorMinimumWidth)
+
+            if model.showsPreview {
+                Divider()
+                PagePreview(
+                    paginated: model.paginated,
+                    caretOffset: caretOffset,
+                    showsPages: $model.previewShowsPages
+                )
+                .frame(minWidth: Style.previewMinimumWidth)
+            }
+
+            if model.showsInspector {
+                Divider()
+                SceneInspector(model: model, sceneIndex: selectedSceneIndex)
+                    .frame(width: Style.inspectorWidth)
             }
         }
     }
@@ -144,7 +190,7 @@ struct RootView: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-            .fixedSize()
+            .frame(width: 276)
             .accessibilityIdentifier("workspace.mode")
         }
         ToolbarItem(placement: .navigation) {
@@ -154,14 +200,15 @@ struct RootView: View {
             .help("Show or hide the scenes sidebar")
             .accessibilityIdentifier("toggle.outline")
         }
-        ToolbarItem {
-            Toggle(isOn: $model.showsPreview) {
-                Label("Preview", systemImage: "doc.text.image")
+        ToolbarItemGroup {
+            if model.workspace != .board {
+                Toggle(isOn: $model.showsPreview) {
+                    Label("Preview", systemImage: "doc.text.image")
+                }
+                .help("Show or hide the page preview")
+                .accessibilityIdentifier("toggle.preview")
             }
-            .help("Show or hide the page preview")
-            .accessibilityIdentifier("toggle.preview")
-        }
-        ToolbarItem {
+
             Toggle(isOn: $model.showsInspector) {
                 Label("Inspector", systemImage: "sidebar.right")
             }
@@ -195,9 +242,12 @@ private struct StatusBar: View {
     let session: FountainEditorSession
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
             Text("Line \(session.state.caretLine), Column \(session.state.caretColumn)")
                 .accessibilityIdentifier("status.caret")
+            Divider()
+                .frame(height: 14)
+            Label(model.mode.title, systemImage: "doc.plaintext")
             DiagnosticsSummary(
                 warnings: model.warningCount,
                 suggestions: model.suggestionCount,
@@ -206,16 +256,15 @@ private struct StatusBar: View {
             Spacer()
             Text("\(model.pageCount) pages")
                 .accessibilityIdentifier("status.pages")
-            Text("\(model.sceneCount) scenes")
-                .accessibilityIdentifier("status.scenes")
-            Text("\(model.characterCount) characters")
+            Divider()
+                .frame(height: 14)
             Text("\(model.wordCount) words")
                 .accessibilityIdentifier("status.words")
         }
         .font(.system(size: 11))
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 14)
         .frame(height: Style.statusBarHeight)
-        .background(Color(nsColor: Style.paneBackground))
+        .background(Color(nsColor: Style.chromeBackground))
     }
 }

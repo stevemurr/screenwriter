@@ -95,6 +95,51 @@ final class OutlineNavigationTests: XCTestCase {
         XCTAssertEqual(actOne.children.last?.sceneIndices, [2])
     }
 
+    func testNavigatorPlacesScenesUnderTheirSequences() throws {
+        let tree = OutlineTree.make(from: ScriptParser.parse(source))
+        let actOne = try XCTUnwrap(section(named: "Act One", in: tree))
+        let beatOne = try XCTUnwrap(section(named: "Beat 1", in: actOne.children))
+        let beatTwo = try XCTUnwrap(section(named: "Beat 2", in: actOne.children))
+
+        XCTAssertEqual(sceneIndices(in: beatOne.children), [1])
+        XCTAssertEqual(sceneIndices(in: beatTwo.children), [2])
+        XCTAssertEqual(sceneIndices(in: tree, recursively: true), [1, 2, 3])
+    }
+
+    func testNavigatorAssignsADeepSceneOnlyToItsDeepestSection() throws {
+        let deepSource = """
+        # Act One
+
+        ## Sequence One
+
+        ### Beat One
+
+        INT. LAB - NIGHT
+
+        The test begins.
+
+        """
+        let tree = OutlineTree.make(from: ScriptParser.parse(deepSource))
+        let act = try XCTUnwrap(section(named: "Act One", in: tree))
+        let sequence = try XCTUnwrap(section(named: "Sequence One", in: act.children))
+        let beat = try XCTUnwrap(section(named: "Beat One", in: sequence.children))
+
+        XCTAssertEqual(sceneIndices(in: beat.children), [1])
+        XCTAssertEqual(sceneIndices(in: tree, recursively: true), [1])
+        XCTAssertEqual(act.sceneCount, 1)
+    }
+
+    func testFilteringKeepsTheMatchingScenesAncestorPath() throws {
+        let tree = OutlineTree.make(from: ScriptParser.parse(source))
+        let filtered = OutlineTree.filter(tree, matchingSceneIndices: [2])
+        let actOne = try XCTUnwrap(section(named: "Act One", in: filtered))
+
+        XCTAssertNil(section(named: "Beat 1", in: actOne.children))
+        let beatTwo = try XCTUnwrap(section(named: "Beat 2", in: actOne.children))
+        XCTAssertEqual(sceneIndices(in: beatTwo.children), [2])
+        XCTAssertNil(section(named: "Act Two", in: filtered))
+    }
+
     func testJumpTokenChangesEvenWhenJumpingToTheSameOffset() {
         // Clicking the same scene twice must still scroll back to it.
         let session = FountainEditorSession()
@@ -103,5 +148,29 @@ final class OutlineNavigationTests: XCTestCase {
         session.jump(to: 42)
         XCTAssertNotEqual(session.state.pendingJump, first)
         XCTAssertEqual(session.state.pendingJump?.offset, 42)
+    }
+
+    private func section(
+        named title: String,
+        in items: [OutlineTreeItem]
+    ) -> OutlineTreeItem? {
+        items.first { item in
+            guard case .section(let node) = item.content else { return false }
+            return node.title == title
+        }
+    }
+
+    private func sceneIndices(
+        in items: [OutlineTreeItem],
+        recursively: Bool = false
+    ) -> [Int] {
+        items.flatMap { item -> [Int] in
+            switch item.content {
+            case .scene(let scene):
+                return [scene.index]
+            case .section:
+                return recursively ? sceneIndices(in: item.children, recursively: true) : []
+            }
+        }
     }
 }
