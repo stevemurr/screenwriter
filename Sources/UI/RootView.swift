@@ -13,13 +13,13 @@ struct RootView: View {
     let document: ScreenplayDocument
 
     @State private var session = FountainEditorSession()
-    @State private var selectedScene: Int?
+    @State private var selection: OutlineSelection?
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 if model.showsOutline {
-                    ScenesSidebar(script: model.script, selection: $selectedScene)
+                    OutlineSidebar(script: model.script, selection: $selection)
                         .frame(width: 260)
                     Divider()
                 }
@@ -41,13 +41,11 @@ struct RootView: View {
         .onChange(of: model.text) { _, _ in
             document.noteTextEdited()
         }
-        .onChange(of: selectedScene) { _, scene in
+        .onChange(of: selection) { _, target in
             // Selecting in the sidebar moves the caret, which is what makes the
             // list a navigator rather than a read-only outline.
-            guard let scene, let target = model.script.scenes.first(where: { $0.index == scene })
-            else { return }
-            session.state.selectedRanges = [NSRange(location: target.range.location, length: 0)]
-            session.state.scrollAnchor = EditorScrollAnchor(characterOffset: target.range.location)
+            guard let offset = target?.sourceOffset(in: model.script) else { return }
+            session.jump(to: offset)
         }
     }
 

@@ -11,3 +11,6 @@ test-results/
 xcuserdata/
 
 .DS_Store
+
+# Agent worktrees and local Claude Code state
+.claude/

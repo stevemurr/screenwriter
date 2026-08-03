@@ -14,6 +14,16 @@ public struct EditorScrollAnchor: Sendable, Hashable {
     }
 }
 
+/// A request from outside the editor to move the caret — clicking a scene in
+/// the sidebar, say.
+///
+/// Carries a token rather than just an offset so that jumping twice to the same
+/// place still registers as two separate requests.
+public struct EditorJump: Sendable, Hashable {
+    public var token: UInt64
+    public var offset: Int
+}
+
 public struct EditorSurfaceState: Sendable {
     public var selectedRanges: [NSRange] = [NSRange(location: 0, length: 0)]
     public var scrollAnchor = EditorScrollAnchor()
@@ -21,6 +31,7 @@ public struct EditorSurfaceState: Sendable {
     /// Caret position for the status bar, one-based.
     public var caretLine = 1
     public var caretColumn = 1
+    public var pendingJump: EditorJump?
     public init() {}
 }
 
@@ -28,7 +39,16 @@ public struct EditorSurfaceState: Sendable {
 @Observable
 public final class FountainEditorSession {
     public var state = EditorSurfaceState()
+    private var jumpCounter: UInt64 = 0
+
     public init() {}
+
+    /// Moves the caret to a source offset and scrolls it into view. This is what
+    /// makes the sidebar a navigator rather than a read-only outline.
+    public func jump(to offset: Int) {
+        jumpCounter &+= 1
+        state.pendingJump = EditorJump(token: jumpCounter, offset: offset)
+    }
 }
 
 /// The Fountain source pane.
@@ -108,6 +128,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
         }
 
         context.coordinator.applyMode(mode)
+        context.coordinator.applyPendingJump(session.state.pendingJump)
         context.coordinator.scheduleStyling(script: script, mode: mode, revision: revision)
     }
 
@@ -124,6 +145,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
         var appliedReplacementToken: UInt64?
         var isEmittingUserEdit = false
         var stylingTask: Task<Void, Never>?
+        private var appliedJumpToken: UInt64?
         private var appliedMode: EditorMode?
         private var styleKey: StyleKey?
         private var undoObservers: [NSObjectProtocol] = []
@@ -216,6 +238,35 @@ public struct FountainEditorSurface: NSViewRepresentable {
             appliedReplacementToken = replacementToken
             host.rulerView.invalidateLineIndex()
             restoreScroll(anchor: priorAnchor)
+        }
+
+        /// Moves the caret in response to a sidebar selection, and centres the
+        /// target rather than merely scrolling it barely into view.
+        func applyPendingJump(_ jump: EditorJump?) {
+            guard let jump, appliedJumpToken != jump.token, let host else { return }
+            appliedJumpToken = jump.token
+            let textView = host.textView
+            let length = (textView.string as NSString).length
+            let offset = min(max(jump.offset, 0), length)
+            let target = NSRange(location: offset, length: 0)
+            textView.selectedRanges = [NSValue(range: target)]
+            textView.scrollRangeToVisible(target)
+            // Bias the target towards the top of the viewport: a scene heading
+            // pinned to the bottom edge hides the scene it introduces.
+            if let layout = textView.textLayoutManager,
+               let content = layout.textContentManager,
+               let location = content.location(
+                   content.documentRange.location,
+                   offsetBy: offset
+               ),
+               let fragment = layout.textLayoutFragment(for: location) {
+                var frame = fragment.layoutFragmentFrame
+                frame.size.height = min(host.scrollView.contentSize.height, frame.height * 8)
+                textView.scrollToVisible(frame.offsetBy(dx: 0, dy: textView.textContainerOrigin.y))
+            }
+            if textView.window?.firstResponder !== textView {
+                textView.window?.makeFirstResponder(textView)
+            }
         }
 
         /// Switching modes preserves the caret and the viewport, because the
