@@ -13,6 +13,18 @@ import Testing
 @Suite("Parser performance")
 struct ScriptParserPerformanceTests {
 
+    /// Milliseconds of CPU actually spent on this thread.
+    ///
+    /// Not wall-clock: swift-testing runs suites concurrently, so a wall-clock
+    /// budget measures how busy the machine happened to be rather than how much
+    /// work the parser did. This suite failed in debug and passed in release for
+    /// exactly that reason — in isolation both were comfortably inside budget.
+    private static func cpuMilliseconds(_ body: () -> Void) -> Double {
+        let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+        body()
+        return Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 1_000_000
+    }
+
     /// The largest script in the reference library, 91 KB.
     private static var largestScript: String? {
         let url = URL(fileURLWithPath: NSHomeDirectory())
@@ -34,22 +46,32 @@ struct ScriptParserPerformanceTests {
 
         var slowest: Double = 0
         for _ in 0..<10 {
-            let start = DispatchTime.now().uptimeNanoseconds
-            let script = ScriptParser.parse(source)
-            let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+            var script = ParsedScript.empty
+            let elapsed = Self.cpuMilliseconds { script = ScriptParser.parse(source) }
             slowest = max(slowest, elapsed)
             #expect(script.scenes.count == 95)
         }
 
         // The budget is the 120ms debounce in `ScreenplayModel`, not a frame:
-        // the parse runs off the main actor, so it never blocks typing. 40ms
-        // leaves room for a machine slower than this one while still catching a
-        // real regression — an earlier version of this parser took 25ms because
-        // `String.count` (a grapheme count) ran on every line.
+        // the parse runs off the main actor, so it never blocks typing.
+        //
+        // Measured in isolation on this machine: 16ms optimised, 30ms
+        // unoptimised. The budget differs by configuration because otherwise it
+        // measures the compiler rather than the parser — a single number either
+        // fails spuriously in debug or is too loose to catch anything in
+        // release. Both leave enough headroom for a slower machine while still
+        // catching a real regression: an earlier version of this parser took
+        // 25ms optimised, because `String.count` — a grapheme count — ran over
+        // every line of the document.
+        #if DEBUG
+        let budget: Double = 90
+        #else
+        let budget: Double = 40
+        #endif
         let slowestText = String(format: "%.2f", slowest)
         #expect(
-            slowest < 40,
-            "Full reparse took \(slowestText)ms, over the 40ms budget. Consider incremental parsing."
+            slowest < budget,
+            "Full reparse took \(slowestText)ms CPU, over the budget. Consider incremental parsing."
         )
     }
 
@@ -60,9 +82,11 @@ struct ScriptParserPerformanceTests {
 
         func measure(_ text: String) -> Double {
             _ = ScriptParser.parse(text)
-            let start = DispatchTime.now().uptimeNanoseconds
-            _ = ScriptParser.parse(text)
-            return Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+            // Best of three: CPU time is immune to other suites competing for
+            // the machine, but not to this thread being descheduled mid-parse.
+            return (0..<3)
+                .map { _ in Self.cpuMilliseconds { _ = ScriptParser.parse(text) } }
+                .min() ?? .infinity
         }
 
         let single = measure(source)
