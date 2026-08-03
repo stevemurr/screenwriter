@@ -60,35 +60,42 @@ struct OutlineSidebar: View {
         return script.characters.filter { $0.localizedCaseInsensitiveContains(filter) }
     }
 
-    private var fullOutlineTree: [OutlineTreeItem] {
-        OutlineTree.make(from: script)
+    /// Everything one body evaluation needs, off a single tree build.
+    ///
+    /// These were five separate computed properties, and `body` read four of
+    /// them — `isEmpty`, `visibleOutlineRows` (twice), and `sectionIDs` for the
+    /// `onChange`. Each rebuilt the whole outline from scratch, so every body
+    /// evaluation ran `OutlineTree.make` four times and `flatten` twice over all
+    /// 95 scenes. Nothing was wrong on screen; it simply did the same work four
+    /// times and threw three of the answers away.
+    private struct Derived {
+        var rows: [OutlineTreeRow] = []
+        var sectionIDs: Set<Int> = []
+        var characters: [String] = []
+        var isEmpty: Bool { rows.isEmpty && characters.isEmpty }
     }
 
-    private var outlineTree: [OutlineTreeItem] {
-        guard !filter.isEmpty else { return fullOutlineTree }
-        return OutlineTree.filter(
-            fullOutlineTree,
-            matchingSceneIndices: Set(filteredScenes.map(\.index))
+    private func derive() -> Derived {
+        let full = OutlineTree.make(from: script)
+        let tree = filter.isEmpty
+            ? full
+            : OutlineTree.filter(full, matchingSceneIndices: Set(filteredScenes.map(\.index)))
+        return Derived(
+            rows: OutlineTree.flatten(
+                tree,
+                collapsedSections: filter.isEmpty ? collapsedSections : []
+            ),
+            sectionIDs: Set(OutlineTree.sectionIDs(in: full)),
+            characters: filteredCharacters
         )
-    }
-
-    private var visibleOutlineRows: [OutlineTreeRow] {
-        OutlineTree.flatten(
-            outlineTree,
-            collapsedSections: filter.isEmpty ? collapsedSections : []
-        )
-    }
-
-    private var sectionIDs: Set<Int> {
-        Set(OutlineTree.sectionIDs(in: fullOutlineTree))
-    }
-
-    private var isEmpty: Bool {
-        outlineTree.isEmpty && filteredCharacters.isEmpty
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        #if DEBUG
+        RenderCounters.outlineBodies += 1
+        #endif
+        let derived = derive()
+        return VStack(spacing: 0) {
             PaneHeader(title: "SCENES") { EmptyView() }
 
             HStack(spacing: 7) {
@@ -121,23 +128,23 @@ struct OutlineSidebar: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
 
-            if isEmpty {
+            if derived.isEmpty {
                 emptyState
             } else {
                 List(selection: $selection) {
-                    if !visibleOutlineRows.isEmpty, !script.sections.isEmpty {
+                    if !derived.rows.isEmpty, !script.sections.isEmpty {
                         Section("OUTLINE") {
-                            outlineRows
+                            outlineRows(derived.rows)
                         }
-                    } else if !visibleOutlineRows.isEmpty {
+                    } else if !derived.rows.isEmpty {
                         Section {
-                            outlineRows
+                            outlineRows(derived.rows)
                         }
                     }
 
-                    if !filteredCharacters.isEmpty {
+                    if !derived.characters.isEmpty {
                         Section("CHARACTERS") {
-                            ForEach(filteredCharacters, id: \.self) { name in
+                            ForEach(derived.characters, id: \.self) { name in
                                 Label(name, systemImage: "person")
                                     .font(.system(size: 12))
                                     .tag(OutlineSelection.character(name))
@@ -163,14 +170,14 @@ struct OutlineSidebar: View {
             .background(Color(nsColor: Style.chromeBackground))
         }
         .background(Color(nsColor: Style.sidebarBackground))
-        .onChange(of: sectionIDs) { _, currentIDs in
+        .onChange(of: derived.sectionIDs) { _, currentIDs in
             collapsedSections.formIntersection(currentIDs)
         }
     }
 
     @ViewBuilder
-    private var outlineRows: some View {
-        ForEach(visibleOutlineRows) { row in
+    private func outlineRows(_ rows: [OutlineTreeRow]) -> some View {
+        ForEach(rows) { row in
             switch row.item.content {
             case .section(let node):
                 let isExpanded = !collapsedSections.contains(node.elementIndex)
@@ -274,6 +281,9 @@ struct OutlineTreeRow: Identifiable, Hashable {
 
 enum OutlineTree {
     static func make(from script: ParsedScript) -> [OutlineTreeItem] {
+        #if DEBUG
+        RenderCounters.outlineTreeBuilds += 1
+        #endif
         var scenesByOwner: [Int: [ScriptScene]] = [:]
         var unownedScenes: [ScriptScene] = []
 

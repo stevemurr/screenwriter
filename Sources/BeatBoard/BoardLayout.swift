@@ -24,6 +24,9 @@ struct BoardLayout {
     /// single column, because a board with no columns would be useless and the
     /// library contains scripts of every shape.
     init(script: ParsedScript) {
+        #if DEBUG
+        RenderCounters.boardLayoutBuilds += 1
+        #endif
         var flat: [SectionNode] = []
         func walk(_ nodes: [SectionNode]) {
             for node in nodes {

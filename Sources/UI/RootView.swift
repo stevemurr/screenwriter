@@ -123,7 +123,7 @@ struct RootView: View {
                 Divider()
                 PagePreview(
                     paginated: model.paginated,
-                    caretOffset: caretOffset,
+                    caretPage: caretPage,
                     showsPages: $model.previewShowsPages
                 )
                 .frame(minWidth: Style.previewMinimumWidth)
@@ -146,6 +146,14 @@ struct RootView: View {
 
     private var caretOffset: Int {
         session.state.selectedRanges.first?.location ?? 0
+    }
+
+    /// Resolved here rather than inside the preview so that the preview's inputs
+    /// only change when the page does. A binary search over 86 pages costs
+    /// nothing; handing the pane a raw offset cost it a whole body evaluation
+    /// and an animated scroll on every keystroke.
+    private var caretPage: Int? {
+        model.paginated?.pageIndex(forSourceOffset: caretOffset)
     }
 
     private var editorPane: some View {
