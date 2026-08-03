@@ -14,7 +14,14 @@ import SwiftUI
 /// rather than an error state.
 struct TitlePageInspector: View {
     @Bindable var model: ScreenplayModel
-    @Environment(\.dismiss) private var dismiss
+    /// Dismissal is the presenter's job.
+    ///
+    /// `@Environment(\.dismiss)` was unreliable here: applying an edit sets
+    /// `model.text`, which re-evaluates the presenting view's body and rebuilds
+    /// this sheet's content, and the captured dismiss action did not always
+    /// survive that. Handing back a closure that flips the presenter's own
+    /// binding has no such ambiguity.
+    let onClose: () -> Void
 
     @State private var draft = TitlePage()
     @State private var original: TitlePage?
@@ -92,7 +99,7 @@ struct TitlePageInspector: View {
                     }
                 }
                 Spacer()
-                Button("Cancel") { dismiss() }
+                Button("Cancel") { onClose() }
                     .keyboardShortcut(.cancelAction)
                 Button("Done") { apply() }
                     .keyboardShortcut(.defaultAction)
@@ -135,6 +142,6 @@ struct TitlePageInspector: View {
             model.text = updated
             model.reparseNow()
         }
-        dismiss()
+        onClose()
     }
 }

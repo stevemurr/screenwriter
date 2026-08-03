@@ -35,7 +35,7 @@ struct RootView: View {
         .background(Color(nsColor: Style.editorBackground))
         .toolbar { toolbarContent }
         .sheet(isPresented: $isEditingTitlePage) {
-            TitlePageInspector(model: model)
+            TitlePageInspector(model: model) { isEditingTitlePage = false }
         }
         .onReceive(NotificationCenter.default.publisher(for: .showTitlePageInspector)) { _ in
             isEditingTitlePage = true
