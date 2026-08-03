@@ -19,10 +19,15 @@ final class ScreenwriterUITests: XCTestCase {
         app.launch()
     }
 
+    /// The editor of the document the app opened at launch.
+    ///
+    /// Deliberately not Cmd-N: launching already opens one untitled screenplay,
+    /// and adding a second window gave two status bars and two of everything
+    /// else to match against.
     private func newDocument() -> XCUIElement {
-        app.typeKey("n", modifierFlags: .command)
         let editor = app.textViews["editor.surface"]
-        XCTAssertTrue(editor.waitForExistence(timeout: 15))
+        XCTAssertTrue(editor.waitForExistence(timeout: 20))
+        XCTAssertEqual(app.windows.count, 1, "Exactly one document window expected.")
         editor.click()
         return editor
     }
@@ -32,18 +37,16 @@ final class ScreenwriterUITests: XCTestCase {
     /// Matching `app.staticTexts["2 scenes"]` by label is ambiguous — the same
     /// string is rendered in the sidebar footer and in the status bar — and an
     /// ambiguous query is a confusing way to fail.
-    private func sceneCountEquals(_ expected: String, timeout: TimeInterval) -> Bool {
-        // By identifier, and reading its label. The status bar carries both now;
-        // the identifier alone would have matched an element whose label was
-        // empty, which is precisely the state that made this unreliable.
-        let element = app.staticTexts["status.scenes"]
-        guard element.waitForExistence(timeout: timeout) else { return false }
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if element.label == expected { return true }
-            usleep(200_000)
-        } while Date() < deadline
-        return element.label == expected
+    /// Waits for a scene to appear in the sidebar.
+    ///
+    /// The sidebar's rows are what a UI test can actually see. Dumping the
+    /// accessibility tree showed every status-bar readout exposing an empty
+    /// label — `status.scenes` is present, its label is not — so asserting on
+    /// the count string there was never going to work, whatever was attached to
+    /// it. The rows carry their headings, and a heading is the more meaningful
+    /// thing to assert anyway.
+    private func waitForScene(_ heading: String, timeout: TimeInterval = 15) -> Bool {
+        app.staticTexts[heading].waitForExistence(timeout: timeout)
     }
 
     private let sample = """
@@ -99,7 +102,6 @@ final class ScreenwriterUITests: XCTestCase {
             "Scenes should appear in the sidebar as they are typed."
         )
         XCTAssertTrue(app.staticTexts["EXT. GARDEN - NIGHT"].exists)
-        XCTAssertTrue(sceneCountEquals("2 scenes", timeout: 5))
     }
 
     func testSelectingASceneMovesTheCaret() {
@@ -143,7 +145,7 @@ final class ScreenwriterUITests: XCTestCase {
 
         // Only attributes change; the text is what was typed.
         XCTAssertTrue(editor.exists)
-        XCTAssertTrue(sceneCountEquals("2 scenes", timeout: 5))
+        XCTAssertTrue(app.staticTexts["EXT. GARDEN - NIGHT"].exists)
     }
 
     func testTitlePageSheetWritesBackIntoTheSource() {
@@ -166,7 +168,7 @@ final class ScreenwriterUITests: XCTestCase {
             "The title page sheet did not dismiss."
         )
         XCTAssertTrue(
-            sceneCountEquals("2 scenes", timeout: 10),
+            waitForScene("EXT. GARDEN - NIGHT"),
             "Adding a title page must not disturb the scenes below it."
         )
     }

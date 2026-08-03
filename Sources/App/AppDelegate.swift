@@ -32,15 +32,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: false)
     }
 
-    /// A cold launch with no document opens exactly one untitled screenplay.
+    /// A cold launch with no document opens exactly one untitled screenplay —
+    /// including under UI test, which uses that window rather than making its
+    /// own.
     ///
-    /// Not under test. This said `!isUnitTest`, and `isUnitTest` is deliberately
-    /// false while `isUITest` is true — so a UI-test launch opened an untitled
-    /// document and the test's own Cmd-N opened a second. Two windows meant two
-    /// status bars (one reading "0 scenes") and two sheets for one menu command,
-    /// which is what three UI failures were actually reporting.
+    /// Suppressing it under test seemed tidier and was not: with no window at
+    /// launch the app never became active, so the window a later Cmd-N created
+    /// never took key focus and everything typed into it went nowhere. Only a
+    /// unit-test host, which has no UI at all, opts out.
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
-        !Self.isUnitTest && !Self.isUITest
+        !Self.isUnitTest
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
