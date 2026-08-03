@@ -204,3 +204,53 @@ final class EditorAccessibilityTests: XCTestCase {
         XCTAssertFalse(host.rulerView.isAccessibilityElement())
     }
 }
+
+/// The editor's type size is a reading preference, not a page setting.
+@MainActor
+final class EditorTypeSizeTests: XCTestCase {
+
+    func testIndentsScaleWithTheType() throws {
+        // At 24pt the dialogue column has to move out too, or the page stops
+        // looking like a screenplay — the text would be twice the size sitting
+        // at its 12pt column.
+        let script = ScriptParser.parse("INT. A - DAY\n\nMARA\nHello.\n")
+        func dialogueIndent(at size: CGFloat) throws -> CGFloat {
+            let styler = ElementStyler(mode: .styled, fontSize: size)
+            let dialogue = try XCTUnwrap(script.elements.first { $0.kind == .dialogue })
+            let run = try XCTUnwrap(styler.runs(for: script).first { $0.range == dialogue.range })
+            let style = try XCTUnwrap(run.attributes[.paragraphStyle] as? NSParagraphStyle)
+            return style.headIndent
+        }
+        let normal = try dialogueIndent(at: 12)
+        let doubled = try dialogueIndent(at: 24)
+        XCTAssertEqual(doubled, normal * 2, accuracy: 0.01)
+    }
+
+    func testThePageGeometryIsUntouchedByTheEditorSize() {
+        // The whole reason this is a separate value: PageLayout is the measured
+        // Highland geometry that pagination and export share.
+        let model = ScreenplayModel()
+        model.load(String(repeating: "INT. A - DAY\n\nHe waits.\n\n", count: 60))
+        let pages = model.pageCount
+        let layout = PageLayout.letter
+
+        _ = ElementStyler(mode: .styled, fontSize: 24)
+        XCTAssertEqual(PageLayout.letter.fontSize, layout.fontSize)
+        XCTAssertEqual(model.pageCount, pages, "Editor type size must not move a page break.")
+    }
+
+    func testAnOutOfRangeOrCorruptStoredValueFallsBack() {
+        XCTAssertEqual(EditorTypeSize.resolve(.nan), EditorTypeSize.default)
+        XCTAssertEqual(EditorTypeSize.resolve(0), EditorTypeSize.default)
+        XCTAssertEqual(EditorTypeSize.resolve(-5), EditorTypeSize.default)
+        XCTAssertEqual(EditorTypeSize.resolve(500), EditorTypeSize.range.upperBound)
+        XCTAssertEqual(EditorTypeSize.resolve(3), EditorTypeSize.range.lowerBound)
+        XCTAssertEqual(EditorTypeSize.resolve(14), 14)
+    }
+
+    func testPlainModeUsesTheSizeToo() throws {
+        let styler = ElementStyler(mode: .plainText, fontSize: 18)
+        let font = try XCTUnwrap(styler.baseAttributes()[.font] as? NSFont)
+        XCTAssertEqual(font.pointSize, 18)
+    }
+}

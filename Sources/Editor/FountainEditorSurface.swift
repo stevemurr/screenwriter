@@ -71,6 +71,8 @@ public struct FountainEditorSurface: NSViewRepresentable {
     let script: ParsedScript
     let diagnostics: [Diagnostic]
     let mode: EditorMode
+    /// Editor-only type size; the page geometry is untouched by it.
+    let fontSize: CGFloat
     /// Bumped by the owner when `script` reflects new content, so the styler
     /// knows to re-run without diffing the whole document.
     let revision: UInt64
@@ -84,6 +86,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
         script: ParsedScript,
         diagnostics: [Diagnostic],
         mode: EditorMode,
+        fontSize: CGFloat,
         revision: UInt64,
         replacementToken: UInt64,
         session: FountainEditorSession
@@ -92,6 +95,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
         self.script = script
         self.diagnostics = diagnostics
         self.mode = mode
+        self.fontSize = fontSize
         self.revision = revision
         self.replacementToken = replacementToken
         self.session = session
@@ -105,9 +109,10 @@ public struct FountainEditorSurface: NSViewRepresentable {
         host.textView.delegate = context.coordinator
         context.coordinator.observeUndo(for: host.textView)
         context.coordinator.applyExternalText(text, replacementToken: replacementToken, resetUndo: true)
-        context.coordinator.applyMode(mode)
+        context.coordinator.applyMode(mode, fontSize: fontSize)
         context.coordinator.scheduleStyling(
-            script: script, diagnostics: diagnostics, mode: mode, revision: revision
+            script: script, diagnostics: diagnostics, mode: mode,
+            fontSize: fontSize, revision: revision
         )
         return host
     }
@@ -132,10 +137,11 @@ public struct FountainEditorSurface: NSViewRepresentable {
             )
         }
 
-        context.coordinator.applyMode(mode)
+        context.coordinator.applyMode(mode, fontSize: fontSize)
         context.coordinator.applyPendingJump(session.state.pendingJump)
         context.coordinator.scheduleStyling(
-            script: script, diagnostics: diagnostics, mode: mode, revision: revision
+            script: script, diagnostics: diagnostics, mode: mode,
+            fontSize: fontSize, revision: revision
         )
     }
 
@@ -154,12 +160,14 @@ public struct FountainEditorSurface: NSViewRepresentable {
         var stylingTask: Task<Void, Never>?
         private var appliedJumpToken: UInt64?
         private var appliedMode: EditorMode?
+        private var appliedFontSize: CGFloat?
         private var styleKey: StyleKey?
         private var undoObservers: [NSObjectProtocol] = []
 
         private struct StyleKey: Equatable {
             let revision: UInt64
             let mode: EditorMode
+            let fontSize: CGFloat
             let source: String
         }
 
@@ -278,14 +286,21 @@ public struct FountainEditorSurface: NSViewRepresentable {
 
         /// Switching modes preserves the caret and the viewport, because the
         /// document did not change — only its attributes and container geometry.
-        func applyMode(_ mode: EditorMode) {
-            guard let host, appliedMode != mode else { return }
+        func applyMode(_ mode: EditorMode, fontSize: CGFloat) {
+            guard let host, appliedMode != mode || appliedFontSize != fontSize else { return }
             let anchor = currentScrollAnchor()
             let ranges = host.textView.selectedRanges
             appliedMode = mode
+            appliedFontSize = fontSize
             styleKey = nil
             host.setShowsLineNumbers(mode == .plainText)
-            host.setScriptColumn(mode == .styled ? Style.scriptColumnWidth : nil)
+            // The script column is a measure in characters, so it grows with the
+            // type just as the indents do.
+            host.setScriptColumn(
+                mode == .styled
+                    ? Style.scriptColumnWidth * (fontSize / PageLayout.letter.fontSize)
+                    : nil
+            )
             applyBaseAttributes()
             host.textView.selectedRanges = ranges
             restoreScroll(anchor: anchor)
@@ -293,7 +308,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
 
         private func applyBaseAttributes() {
             guard let textView = host?.textView, let storage = textView.textStorage else { return }
-            let styler = ElementStyler(mode: parent.mode)
+            let styler = ElementStyler(mode: parent.mode, fontSize: parent.fontSize)
             let undoManager = textView.undoManager
             undoManager?.disableUndoRegistration()
             storage.setAttributes(
@@ -311,9 +326,12 @@ public struct FountainEditorSurface: NSViewRepresentable {
             script: ParsedScript,
             diagnostics: [Diagnostic],
             mode: EditorMode,
+            fontSize: CGFloat,
             revision: UInt64
         ) {
-            let key = StyleKey(revision: revision, mode: mode, source: script.source)
+            let key = StyleKey(
+                revision: revision, mode: mode, fontSize: fontSize, source: script.source
+            )
             guard key != styleKey else { return }
             styleKey = key
             stylingTask?.cancel()
@@ -323,7 +341,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
             // view still holds the exact source it was computed from.
             stylingTask = Task { [weak self] in
                 let runs = await Task.detached(priority: .userInitiated) {
-                    let styler = ElementStyler(mode: mode)
+                    let styler = ElementStyler(mode: mode, fontSize: fontSize)
                     let length = (script.source as NSString).length
                     return styler.runs(for: script)
                         + styler.diagnosticRuns(diagnostics, length: length)
@@ -346,7 +364,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
             undoManager?.disableUndoRegistration()
             defer { undoManager?.enableUndoRegistration() }
 
-            let styler = ElementStyler(mode: key.mode)
+            let styler = ElementStyler(mode: key.mode, fontSize: key.fontSize)
             let full = NSRange(location: 0, length: storage.length)
             storage.beginEditing()
             storage.setAttributes(styler.baseAttributes(), range: full)

@@ -16,6 +16,7 @@ struct RootView: View {
     @State private var session = FountainEditorSession()
     @State private var selection: OutlineSelection?
     @State private var isEditingTitlePage = false
+    @AppStorage(PrefKey.editorFontSize) private var editorFontSize = EditorTypeSize.default
 
     var body: some View {
         VStack(spacing: 0) {
@@ -117,6 +118,7 @@ struct RootView: View {
                 script: model.script,
                 diagnostics: model.diagnostics,
                 mode: model.mode,
+                fontSize: CGFloat(EditorTypeSize.resolve(editorFontSize)),
                 revision: model.revision,
                 replacementToken: model.replacementToken,
                 session: session

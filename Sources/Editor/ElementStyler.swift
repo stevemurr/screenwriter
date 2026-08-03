@@ -40,24 +40,31 @@ public struct ElementStyler: Sendable {
 
     public let mode: EditorMode
     public let layout: PageLayout
+    /// Type size for the editing surface. Scales the styled columns with it, so
+    /// the page keeps its proportions at any size.
+    public let fontSize: CGFloat
 
-    public init(mode: EditorMode, layout: PageLayout = .letter) {
+    public init(mode: EditorMode, layout: PageLayout = .letter, fontSize: CGFloat = 12) {
         self.mode = mode
         self.layout = layout
+        self.fontSize = fontSize
     }
+
+    /// Editor size over the page's own 12pt.
+    private var scale: CGFloat { fontSize / layout.fontSize }
 
     /// Base attributes for the whole document, applied before per-element runs.
     public func baseAttributes() -> [NSAttributedString.Key: Any] {
         switch mode {
         case .plainText:
             return [
-                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+                .font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular),
                 .foregroundColor: Style.Element.body,
                 .paragraphStyle: NSParagraphStyle.default
             ]
         case .styled:
             return [
-                .font: ScreenplayFont.regular(size: layout.fontSize),
+                .font: ScreenplayFont.regular(size: fontSize),
                 .foregroundColor: Style.Element.body,
                 .paragraphStyle: paragraphStyle(for: .action)
             ]
@@ -137,7 +144,7 @@ public struct ElementStyler: Sendable {
     private func plainFont(for kind: ElementKind) -> NSFont? {
         switch kind {
         case .sceneHeading, .section:
-            return .monospacedSystemFont(ofSize: 12, weight: .semibold)
+            return .monospacedSystemFont(ofSize: fontSize, weight: .semibold)
         default:
             return nil
         }
@@ -148,11 +155,11 @@ public struct ElementStyler: Sendable {
         case .sceneHeading:
             // Highland underlines sluglines in its Final Draft exports; bold
             // reads better on screen and stays out of the PDF's way.
-            return ScreenplayFont.bold(size: layout.fontSize)
+            return ScreenplayFont.bold(size: fontSize)
         case .synopsis, .note:
-            return ScreenplayFont.italic(size: layout.fontSize)
+            return ScreenplayFont.italic(size: fontSize)
         default:
-            return ScreenplayFont.regular(size: layout.fontSize)
+            return ScreenplayFont.regular(size: fontSize)
         }
     }
 
@@ -163,8 +170,8 @@ public struct ElementStyler: Sendable {
     private func paragraphStyle(for kind: ElementKind) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
         style.lineHeightMultiple = 1
-        style.minimumLineHeight = layout.lineHeight
-        style.maximumLineHeight = layout.lineHeight
+        style.minimumLineHeight = layout.lineHeight * scale
+        style.maximumLineHeight = layout.lineHeight * scale
 
         switch kind {
         case .transition:
@@ -173,12 +180,14 @@ public struct ElementStyler: Sendable {
             style.alignment = .center
         default:
             style.alignment = .natural
-            let head = layout.leftEdge(for: kind) - layout.actionLeft
+            // Scaled with the type: at 20pt the dialogue column has to move
+            // out too, or the screenplay stops looking like one.
+            let head = (layout.leftEdge(for: kind) - layout.actionLeft) * scale
             style.firstLineHeadIndent = head
             style.headIndent = head
             // Negative tail indents measure inward from the container's right
             // edge, which sits at the page's 7.5" line.
-            style.tailIndent = -(layout.rightEdge - layout.rightEdge(for: kind))
+            style.tailIndent = -(layout.rightEdge - layout.rightEdge(for: kind)) * scale
         }
         return style
     }
