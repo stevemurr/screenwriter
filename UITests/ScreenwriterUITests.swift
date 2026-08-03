@@ -93,8 +93,10 @@ final class ScreenwriterUITests: XCTestCase {
         let editor = newDocument()
         editor.typeText(sample)
 
-        app.popUpButtons["editor.mode"].click()
-        app.menuItems["Styled"].click()
+        // Cmd-Shift-2 rather than the picker: "Styled" appears both in the
+        // pane's menu and in the View menu, so matching it by label alone is
+        // ambiguous and XCUITest refuses to guess.
+        app.typeKey("2", modifierFlags: [.command, .shift])
 
         // Only attributes change; the text is what was typed.
         XCTAssertTrue(editor.exists)
@@ -106,13 +108,13 @@ final class ScreenwriterUITests: XCTestCase {
         editor.typeText(sample)
 
         app.typeKey("t", modifierFlags: [.command, .shift])
-        let sheet = app.otherElements["titlepage.root"]
-        XCTAssertTrue(sheet.waitForExistence(timeout: 10))
-
-        let title = app.textFields["titlepage.title"]
+        // Sheets are their own element class; `otherElements` does not reach the
+        // hosted SwiftUI root inside one.
+        let title = app.sheets.firstMatch.textFields["titlepage.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
         title.click()
         title.typeText("Glass House")
-        app.buttons["Done"].click()
+        app.sheets.firstMatch.buttons["Done"].click()
 
         // The block is written into the document, so it shows up in the source.
         XCTAssertTrue(
@@ -163,9 +165,12 @@ final class ScreenwriterUITests: XCTestCase {
     }
 
     func testPreviewPaneCanBeHidden() {
-        _ = newDocument()
+        let editor = newDocument()
+        // A document with no pages shows the preview's empty state instead of a
+        // scroll view, which is correct behaviour and not what this is testing.
+        editor.typeText(sample)
         let preview = app.scrollViews["preview.pages"]
-        XCTAssertTrue(preview.waitForExistence(timeout: 10))
+        XCTAssertTrue(preview.waitForExistence(timeout: 15))
         app.checkBoxes["toggle.preview"].click()
         XCTAssertFalse(preview.exists)
     }
