@@ -37,7 +37,9 @@ struct RootView: View {
         .sheet(isPresented: $isEditingTitlePage) {
             TitlePageInspector(model: model) { isEditingTitlePage = false }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .showTitlePageInspector)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .showTitlePageInspector)) { note in
+            // Only the document the command was aimed at.
+            guard note.object as? ScreenplayModel === model else { return }
             isEditingTitlePage = true
         }
         .onChange(of: model.text) { _, _ in

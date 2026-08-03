@@ -33,9 +33,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// A cold launch with no document opens exactly one untitled screenplay.
-    /// Under test nothing opens, so a test starts from a known state.
+    ///
+    /// Not under test. This said `!isUnitTest`, and `isUnitTest` is deliberately
+    /// false while `isUITest` is true — so a UI-test launch opened an untitled
+    /// document and the test's own Cmd-N opened a second. Two windows meant two
+    /// status bars (one reading "0 scenes") and two sheets for one menu command,
+    /// which is what three UI failures were actually reporting.
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
-        !Self.isUnitTest
+        !Self.isUnitTest && !Self.isUITest
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -74,8 +79,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showTitlePage(_ sender: Any?) {
-        guard frontmostModel != nil else { return }
-        NotificationCenter.default.post(name: .showTitlePageInspector, object: nil)
+        // Addressed to one document. Posting with a nil object reached every
+        // open RootView, so a single Cmd-Shift-T opened a sheet on every window.
+        guard let model = frontmostModel else { return }
+        NotificationCenter.default.post(name: .showTitlePageInspector, object: model)
     }
 
     @objc func showSettings(_ sender: Any?) {
