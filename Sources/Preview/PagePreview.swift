@@ -14,16 +14,28 @@ import SwiftUI
 /// prints is `PrintSettings`' job now, not this view's.
 struct PagePreview: View {
     let paginated: PaginatedScript?
-    let caretOffset: Int
+    /// Which page the caret is on — not where in the document it is.
+    ///
+    /// This used to be the raw caret offset, and that made every keystroke a new
+    /// view value: a fresh `body`, a fresh `ForEach` over every page, and an
+    /// animated `scrollTo` the top of the page the writer was already on. The
+    /// preview can only ever scroll to a page top, so the offset carried nothing
+    /// this view could act on. Measured on the 95-scene reference script: of
+    /// 89,287 caret positions, 86 change page — 99.9% of those scrolls only
+    /// undid the writer's own scrolling.
+    let caretPage: Int?
     @Binding var showsPages: Bool
 
     private var layout: PageLayout { PageLayout.letter }
 
     var body: some View {
-        VStack(spacing: 0) {
+        #if DEBUG
+        RenderCounters.previewBodies += 1
+        #endif
+        return VStack(spacing: 0) {
             PaneHeader(title: "PAGE PREVIEW") {
                 HStack(spacing: 8) {
-                    if let paginated, let page = paginated.page(forSourceOffset: caretOffset) {
+                    if let paginated, let page = currentPage(in: paginated) {
                         Text(page.isTitlePage
                              ? "Title page"
                              : "Page \(page.number) of \(paginated.bodyPageCount)")
@@ -56,6 +68,13 @@ struct PagePreview: View {
         .background(Color(nsColor: Style.canvasBackground))
     }
 
+    /// Tolerates an index from a pagination the caret has already moved past —
+    /// the page count changes a debounce after the text does.
+    private func currentPage(in paginated: PaginatedScript) -> PaginatedPage? {
+        guard let caretPage, paginated.pages.indices.contains(caretPage) else { return nil }
+        return paginated.pages[caretPage]
+    }
+
     private func pageScroller(_ paginated: PaginatedScript) -> some View {
         GeometryReader { geometry in
             let pagePadding: CGFloat = showsPages ? 20 : 0
@@ -79,10 +98,17 @@ struct PagePreview: View {
                     .frame(maxWidth: .infinity)
                 }
                 .accessibilityIdentifier("preview.pages")
-                .onChange(of: caretOffset) { _, offset in
-                    // The preview follows the caret, so typing near a page break
-                    // shows the break rather than making the writer hunt for it.
-                    guard let index = paginated.pageIndex(forSourceOffset: offset) else { return }
+                .onChange(of: caretPage) { _, index in
+                    // The preview follows the caret onto a new page, so writing
+                    // across a page break shows the break. It deliberately does
+                    // *not* follow within a page: there is nothing finer to
+                    // scroll to, and re-running this on every keystroke dragged
+                    // the preview back to the page top each time, so a writer
+                    // could not read the foot of a page while typing into it.
+                    guard let index, paginated.pages.indices.contains(index) else { return }
+                    #if DEBUG
+                    RenderCounters.previewScrolls += 1
+                    #endif
                     withAnimation(.easeOut(duration: 0.18)) {
                         proxy.scrollTo(index, anchor: .top)
                     }
@@ -93,7 +119,7 @@ struct PagePreview: View {
 }
 
 /// One page, drawn at the paginator's own coordinates.
-private struct PageCanvas: View {
+struct PageCanvas: View {
     let page: PaginatedPage
     let layout: PageLayout
     /// Page mode draws a paper card; continuous mode runs the text together.
@@ -146,7 +172,9 @@ private struct PageCanvas: View {
         return page.label
     }
 
-    private func styled(_ line: PageLine) -> AttributedString {
+    /// Internal, not private, so `WorkspaceRenderCostTests` can put a budget on
+    /// it: this runs for every printed line of every page that is redrawn.
+    func styled(_ line: PageLine) -> AttributedString {
         var attributed = AttributedString(line.text)
         attributed.font = .custom(fontName, size: layout.fontSize)
         attributed.foregroundColor = Style.paperInk

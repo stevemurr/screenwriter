@@ -102,7 +102,7 @@ final class PreviewIntegrationTests: XCTestCase {
         let view = NSHostingView(
             rootView: PagePreview(
                 paginated: model.paginated,
-                caretOffset: 0,
+                caretPage: 0,
                 showsPages: .constant(true)
             )
             .frame(width: 700, height: 900)
