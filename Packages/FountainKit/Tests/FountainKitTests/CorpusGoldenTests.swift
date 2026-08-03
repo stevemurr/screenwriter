@@ -71,8 +71,31 @@ enum Corpus {
         .appendingPathComponent("Fixtures", isDirectory: true)
         .appendingPathComponent("Golden", isDirectory: true)
 
+    /// A snapshot of a corpus script vendored into the repo, when one exists.
+    ///
+    /// The corpus is the user's live work. Using it directly as a regression
+    /// fixture meant that cleaning up their own screenplay broke this suite —
+    /// which is backwards, and also erodes the fixture: applying 243 lint fixes
+    /// to `anal-informant` took `scene-heading-needs-blank-line` from 24
+    /// examples to 3, gutting the evidence that the rule is tuned.
+    ///
+    /// A vendored script is pinned and never changes, so the counts below stay
+    /// meaningful and the user can edit their scripts freely. Anything not
+    /// vendored still reads live.
+    static let vendoredDirectory = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/Corpus")
+
+    static func vendoredURL(for relativePath: String) -> URL? {
+        let url = vendoredDirectory.appendingPathComponent(relativePath)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
     static func source(of relativePath: String) throws -> String {
-        try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
+        if let vendored = vendoredURL(for: relativePath) {
+            return try String(contentsOf: vendored, encoding: .utf8)
+        }
+        return try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
     }
 
     static func goldenURL(for relativePath: String) -> URL {
@@ -322,6 +345,21 @@ struct CorpusGoldenTests {
             diagnostics.allSatisfy { $0.lineIndex >= 0 },
             "\(relativePath): a diagnostic carries a negative line index."
         )
+    }
+
+    @Test("The vendored snapshot is the script the counts were measured against")
+    func vendoredSnapshotIsIntact() throws {
+        let path = "Anal Informant/anal-informant.fountain"
+        // `Comment` only converts from a literal, so no concatenation here.
+        let url = try #require(
+            Corpus.vendoredURL(for: path),
+            "The vendored snapshot is missing; every pinned count below would silently start measuring whatever the user's live file happens to be today."
+        )
+        let text = try String(contentsOf: url, encoding: .utf8)
+        // The 21 March 2026 state, before 243 lint fixes were applied to the
+        // live file. These two numbers are what CLAUDE.md documents.
+        #expect(text.utf8.count == 91_149)
+        #expect(text.components(separatedBy: "\n").count == 3_581)
     }
 
     /// Measured directly from the files, not inferred. These are the numbers

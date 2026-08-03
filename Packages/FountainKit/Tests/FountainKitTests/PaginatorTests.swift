@@ -600,12 +600,14 @@ struct PaginatorOracleTests {
 @Suite("Paginator performance")
 struct PaginatorPerformanceTests {
 
+    /// Through the shared resolver, which prefers the vendored snapshot.
+    ///
+    /// Read the user's live file directly and the 85-page expectation below
+    /// becomes a claim about whatever they last edited — this test started
+    /// failing when they applied 243 lint fixes to their own screenplay, which
+    /// is not a regression in anything.
     private static var largestScript: String? {
-        let url = URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent(
-                "Code/github.com/stevemurr/screenplays/Anal Informant/anal-informant.fountain"
-            )
-        return try? String(contentsOf: url, encoding: .utf8)
+        try? Corpus.source(of: "Anal Informant/anal-informant.fountain")
     }
 
     @Test("Paginating the largest script stays inside the debounce window")
@@ -619,9 +621,12 @@ struct PaginatorPerformanceTests {
 
         var slowest: Double = 0
         for _ in 0..<10 {
-            let start = DispatchTime.now().uptimeNanoseconds
+            let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
             let paginated = Paginator.paginate(script)
-            slowest = max(slowest, Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+            slowest = max(
+                slowest,
+                Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 1_000_000
+            )
             #expect(paginated.pageCount == 85)
         }
 
@@ -647,9 +652,9 @@ struct PaginatorPerformanceTests {
 
         func measure(_ script: ParsedScript) -> Double {
             _ = Paginator.paginate(script)
-            let start = DispatchTime.now().uptimeNanoseconds
+            let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
             _ = Paginator.paginate(script)
-            return Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+            return Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 1_000_000
         }
 
         let one = measure(single)

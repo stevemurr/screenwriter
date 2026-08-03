@@ -182,8 +182,20 @@ layer, separately and testably — never by refusing to parse.
 ## Reference corpus
 
 `~/Code/github.com/stevemurr/screenplays` — 17 `.fountain`, 59 `.highland`,
-50 Highland-exported PDFs. This is the regression suite, not sample data. Tests
-that need it skip when it is absent rather than failing.
+50 Highland-exported PDFs. Tests that need it skip when it is absent rather than
+failing.
+
+**It is the user's live work, not a fixture.** They edit these files, and when
+they cleaned up `anal-informant` with the app's own lint fixes — 243 of them —
+every pinned count broke: trailing-whitespace-on-cue 424 → 204,
+needs-blank-line 24 → 3, title pages 7 → 8, that script 85 → 86 pages. None of
+that was a regression in anything.
+
+So a script whose exact numbers are pinned is **vendored** into
+`Tests/FountainKitTests/Fixtures/Corpus/`, and `Corpus.source(of:)` prefers the
+vendored copy. Read the live file directly and your assertion becomes a claim
+about whatever the user last typed. `vendoredSnapshotIsIntact` pins the snapshot
+itself so it cannot drift silently.
 
 Measured facts worth knowing: `anal-informant.fountain` is 3,581 lines with 95
 `#N#`-numbered scenes and 40 sections; `THICK` forces essentially every line

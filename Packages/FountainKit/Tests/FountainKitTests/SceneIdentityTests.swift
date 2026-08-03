@@ -538,11 +538,11 @@ struct SceneIdentityCorpusTests {
     /// The largest script in the reference library: 91 KB, 95 scenes, every one
     /// of them numbered.
     private static var analInformant: String? {
-        let url = URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent(
-                "Code/github.com/stevemurr/screenplays/Anal Informant/anal-informant.fountain"
-            )
-        return try? String(contentsOf: url, encoding: .utf8)
+        // Through the shared resolver, which prefers the vendored snapshot in
+        // Fixtures/Corpus. Reading the user's live file made this suite depend
+        // on their editing: applying lint fixes to their own screenplay changed
+        // its size and broke assertions that were never about the code.
+        try? Corpus.source(of: "Anal Informant/anal-informant.fountain")
     }
 
     /// Rebuilds a script's source with its scenes in a new order, some of them
@@ -684,9 +684,11 @@ struct SceneIdentityCorpusTests {
         let reparsed = ScriptParser.parse(edited)
 
         _ = SceneIdentityResolver.resolve(metadata, against: reparsed)      // warm up
-        let start = DispatchTime.now().uptimeNanoseconds
+        // CPU time, not wall clock: this budget must bound the resolver, not
+        // whatever else the machine is doing while the suite runs.
+        let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
         for _ in 0..<10 { _ = SceneIdentityResolver.resolve(metadata, against: reparsed) }
-        let each = Double(DispatchTime.now().uptimeNanoseconds - start) / 10_000_000
+        let each = Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 10_000_000
 
         // Runs after a reparse, which is itself ~15ms behind a 120ms debounce.
         // The budget is generous; what it catches is the fuzzy tier going

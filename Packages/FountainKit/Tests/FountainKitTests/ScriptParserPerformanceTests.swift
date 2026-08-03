@@ -27,11 +27,11 @@ struct ScriptParserPerformanceTests {
 
     /// The largest script in the reference library, 91 KB.
     private static var largestScript: String? {
-        let url = URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent(
-                "Code/github.com/stevemurr/screenplays/Anal Informant/anal-informant.fountain"
-            )
-        return try? String(contentsOf: url, encoding: .utf8)
+        // Through the shared resolver, which prefers the vendored snapshot in
+        // Fixtures/Corpus. Reading the user's live file made this suite depend
+        // on their editing: applying lint fixes to their own screenplay changed
+        // its size and broke assertions that were never about the code.
+        try? Corpus.source(of: "Anal Informant/anal-informant.fountain")
     }
 
     @Test("A full reparse of the largest script stays inside the debounce window")
