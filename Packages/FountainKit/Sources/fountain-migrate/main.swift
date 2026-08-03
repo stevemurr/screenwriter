@@ -52,6 +52,8 @@ case "report":
     var totalScenes = 0
     var totalSections = 0
     var withTitlePage = 0
+    var totalWarnings = 0
+    var totalSuggestions = 0
 
     while let url = enumerator?.nextObject() as? URL {
         guard url.pathExtension == "fountain" else { continue }
@@ -60,9 +62,19 @@ case "report":
             continue
         }
         let script = ScriptParser.parse(source)
+        // The report exists to survey the library before migrating it, and the
+        // linter is the half that finds anything worth acting on — the six
+        // `## 1. EXT. RAVINE - DAY` sluglines-as-sections that Highland drops
+        // silently from its PDFs are a lint finding, not a scene count. It was
+        // parsing and then not asking.
+        let diagnostics = Linter.lint(script)
+        let warnings = diagnostics.count { $0.severity == .warning }
+        let suggestions = diagnostics.count { $0.severity == .suggestion }
         files += 1
         totalScenes += script.scenes.count
         totalSections += script.sections.count
+        totalWarnings += warnings
+        totalSuggestions += suggestions
         if script.titlePage != nil { withTitlePage += 1 }
 
         let name = url.lastPathComponent
@@ -71,7 +83,9 @@ case "report":
         \(String(format: "%4d", script.scenes.count)) scenes  \
         \(String(format: "%3d", script.sections.count)) top sections  \
         \(String(format: "%3d", script.characters.count)) chars  \
-        \(script.titlePage != nil ? "title" : "     ")
+        \(script.titlePage != nil ? "title" : "     ")  \
+        \(warnings > 0 ? String(format: "%3d warn", warnings) : "       ")  \
+        \(suggestions > 0 ? String(format: "%3d sugg", suggestions) : "")
         """)
     }
 
@@ -79,6 +93,7 @@ case "report":
 
     \(files) files · \(totalScenes) scenes · \(totalSections) top-level sections · \
     \(withTitlePage) with a title page
+    \(totalWarnings) warnings · \(totalSuggestions) suggestions
     """)
 
 case "profile":
