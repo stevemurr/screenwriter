@@ -1,0 +1,31 @@
+# Golden digest v1 — do not hand-edit.
+# REGENERATE_GOLDENS=1 swift test --package-path Packages/FountainKit
+source: Horror Film 01/script.fountain
+lines: 10
+elements: 10
+scenes: 0
+sections: 10
+outlineNodes: 10
+characters: 0
+titlePage: none
+
+[cast]
+
+[kinds] <firstLine>[-<lastLine>]:<elementKind>, one entry per run
+0-9:section
+
+[scenes] <index> <number|-> <heading>
+
+[outline] <depth> <title>
+1 Neighbors move in
+1 Neighbors raise questions
+1 Wake up to a woman screaming. See someone in a mask run down the hill and jump into a car and drive off. A car exits the driveway quickly. Cops arrive.
+1 Investigates neighbors home and finds a femme fatale type
+1 Sex
+1 Invite to home
+1 Creepy
+1 Scream another night
+1 Runs over to house
+1 Something happens
+
+[lint] <rule> <count>

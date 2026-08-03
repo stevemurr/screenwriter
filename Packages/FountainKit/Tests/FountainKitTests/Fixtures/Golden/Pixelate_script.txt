@@ -1,0 +1,165 @@
+# Golden digest v1 — do not hand-edit.
+# REGENERATE_GOLDENS=1 swift test --package-path Packages/FountainKit
+source: Pixelate/script.fountain
+lines: 158
+elements: 158
+scenes: 3
+sections: 4
+outlineNodes: 4
+characters: 4
+titlePage: Title|Credit|Author|Source|Draft Date|Contact
+
+[cast]
+CHRIS
+JERRY
+SIMULATED CHARACTER
+LIZ
+
+[kinds] <firstLine>[-<lastLine>]:<elementKind>, one entry per run
+0-11:blank
+12:section
+13:action
+14:blank
+15:sceneHeading
+16:action
+17:blank
+18:sceneHeading
+19:action
+20:blank
+21:section
+22-26:action
+27:blank
+28:section
+29-31:action
+32-34:boneyard
+35:blank
+36:sceneHeading
+37:blank
+38:action
+39:blank
+40:character
+41:dialogue
+42:blank
+43:character
+44:dialogue
+45:blank
+46:character
+47-48:dialogue
+49:blank
+50:character
+51:dialogue
+52:blank
+53:action
+54:blank
+55:action
+56:blank
+57:character
+58:dialogue
+59:blank
+60:action
+61:blank
+62:action
+63:blank
+64:character
+65:dialogue
+66:blank
+67:action
+68:blank
+69:character
+70:dialogue
+71:blank
+72:character
+73:dialogue
+74:blank
+75:character
+76:dialogue
+77:blank
+78:action
+79:blank
+80:character
+81:dialogue
+82:blank
+83:character
+84:dialogue
+85:blank
+86:character
+87:dialogue
+88:blank
+89:action
+90:blank
+91:character
+92:dialogue
+93:blank
+94:action
+95:blank
+96:character
+97:dialogue
+98:blank
+99:character
+100:dialogue
+101:blank
+102:character
+103:dialogue
+104:blank
+105:character
+106:dialogue
+107:blank
+108:character
+109:dialogue
+110:blank
+111:action
+112:blank
+113:character
+114:dialogue
+115:blank
+116:character
+117:dialogue
+118:blank
+119:character
+120:dialogue
+121:blank
+122:section
+123:blank
+124:character
+125:dialogue
+126:blank
+127:character
+128:dialogue
+129:blank
+130:character
+131:dialogue
+132:blank
+133:character
+134:dialogue
+135:parenthetical
+136:dialogue
+137:blank
+138:character
+139:dialogue
+140:blank
+141:character
+142:parenthetical
+143:dialogue
+144:blank
+145:character
+146:parenthetical
+147:dialogue
+148:blank
+149:character
+150:dialogue
+151-157:blank
+
+[scenes] <index> <number|-> <heading>
+1 - I/E. MONTAGE IMAGE - LIZ AWARDED
+2 - I/E MONTAGE IMAGE - CHRIS BACKGROUND
+3 1 INT. HOME OFFICE - DAY
+
+[outline] <depth> <title>
+1 Opening Version 1
+1 Opening Version 2
+1 Opening Version 3
+1 Example existential interaction
+
+[lint] <rule> <count>
+scene-heading-separator 1
+trailing-whitespace-on-cue 1
