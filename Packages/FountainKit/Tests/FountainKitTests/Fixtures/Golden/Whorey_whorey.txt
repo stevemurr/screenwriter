@@ -1,0 +1,122 @@
+# Golden digest v1 — do not hand-edit.
+# REGENERATE_GOLDENS=1 swift test --package-path Packages/FountainKit
+source: Whorey/whorey.fountain
+lines: 101
+elements: 101
+scenes: 5
+sections: 0
+outlineNodes: 0
+characters: 3
+titlePage: Title|Credit|Author|Date|Contact
+
+[cast]
+HORACE
+CAROL ANNE
+RANDY
+
+[kinds] <firstLine>[-<lastLine>]:<elementKind>, one entry per run
+0-8:blank
+9:sceneHeading
+10:blank
+11:sceneHeading
+12:blank
+13:character
+14:dialogue
+15:blank
+16:character
+17:dialogue
+18:blank
+19:character
+20:dialogue
+21:blank
+22:character
+23:parenthetical
+24:dialogue
+25:blank
+26:character
+27:parenthetical
+28:dialogue
+29:blank
+30:sceneHeading
+31:blank
+32:action
+33:blank
+34:sceneHeading
+35:blank
+36:sceneHeading
+37:blank
+38:character
+39:parenthetical
+40:dialogue
+41:blank
+42:character
+43:parenthetical
+44:dialogue
+45:blank
+46:character
+47:dialogue
+48:blank
+49:character
+50:dialogue
+51:blank
+52:character
+53:dialogue
+54:blank
+55:character
+56:dialogue
+57:blank
+58:character
+59:dialogue
+60:blank
+61:character
+62:dialogue
+63:blank
+64:character
+65:parenthetical
+66:dialogue
+67:blank
+68:character
+69:dialogue
+70:blank
+71:character
+72:dialogue
+73:blank
+74:character
+75:parenthetical
+76:dialogue
+77:blank
+78:character
+79:parenthetical
+80:dialogue
+81:blank
+82:character
+83:dialogue
+84:blank
+85:character
+86:parenthetical
+87:dialogue
+88:blank
+89:character
+90:dialogue
+91:blank
+92:character
+93:parenthetical
+94:dialogue
+95:blank
+96:character
+97:dialogue
+98-100:blank
+
+[scenes] <index> <number|-> <heading>
+1 - INT. Horace apartment desk
+2 - black screen with HORACE lightly moaning
+3 - FaceTime call ends
+4 - INT. randys apartment (is adams batshit crazy place)
+5 - this is exactly like jason schwartzmen meeting lily tomlin
+
+[outline] <depth> <title>
+
+[lint] <rule> <count>
+ambiguous-forced-mark 3
+lowercase-scene-heading 2
+trailing-whitespace-on-cue 1

@@ -1,0 +1,206 @@
+# Golden digest v1 — do not hand-edit.
+# REGENERATE_GOLDENS=1 swift test --package-path Packages/FountainKit
+source: Ergosphere/ergosphere.fountain
+lines: 173
+elements: 173
+scenes: 11
+sections: 3
+outlineNodes: 3
+characters: 4
+titlePage: Title
+
+[cast]
+MAN IN SUIT
+LAM
+JOSIAH
+ALEX
+
+[kinds] <firstLine>[-<lastLine>]:<elementKind>, one entry per run
+0-1:blank
+2:sceneHeading
+3:blank
+4:sceneHeading
+5:blank
+6:character
+7:dialogue
+8:blank
+9:sceneHeading
+10:blank
+11:character
+12:dialogue
+13:blank
+14:sceneHeading
+15:blank
+16:character
+17:dialogue
+18:parenthetical
+19:blank
+20:character
+21:dialogue
+22:parenthetical
+23:blank
+24:sceneHeading
+25:blank
+26:character
+27:dialogue
+28:parenthetical
+29:blank
+30:character
+31:dialogue
+32:parenthetical
+33:blank
+34:character
+35:dialogue
+36:blank
+37:character
+38:dialogue
+39:parenthetical
+40-41:blank
+42:sceneHeading
+43:blank
+44:character
+45:dialogue
+46:parenthetical
+47:blank
+48:character
+49:dialogue
+50:blank
+51:character
+52:dialogue
+53:blank
+54:character
+55:dialogue
+56:blank
+57:character
+58:dialogue
+59:blank
+60:character
+61:dialogue
+62:blank
+63:character
+64:dialogue
+65:blank
+66:sceneHeading
+67:blank
+68:sceneHeading
+69-71:blank
+72:sceneHeading
+73:blank
+74:character
+75:parenthetical
+76:dialogue
+77:blank
+78:transition
+79:blank
+80:transition
+81:blank
+82:transition
+83-84:blank
+85-86:sceneHeading
+87:blank
+88:character
+89:dialogue
+90:blank
+91:character
+92:dialogue
+93:blank
+94:character
+95-96:dialogue
+97:parenthetical
+98:blank
+99:character
+100:dialogue
+101:parenthetical
+102:blank
+103:character
+104:dialogue
+105:parenthetical
+106:blank
+107:character
+108:dialogue
+109:parenthetical
+110:blank
+111:character
+112:dialogue
+113:parenthetical
+114:blank
+115:character
+116:dialogue
+117:parenthetical
+118:blank
+119:character
+120:dialogue
+121:parenthetical
+122:blank
+123:character
+124:dialogue
+125:parenthetical
+126:blank
+127:character
+128:dialogue
+129:blank
+130:transition
+131:blank
+132:section
+133:blank
+134:transition
+135:blank
+136:transition
+137:blank
+138:transition
+139:blank
+140:transition
+141:blank
+142:transition
+143:blank
+144:section
+145:blank
+146:transition
+147:blank
+148:transition
+149:blank
+150:transition
+151:blank
+152:transition
+153:blank
+154:transition
+155:blank
+156:transition
+157:blank
+158:transition
+159:blank
+160:transition
+161:blank
+162:section
+163:blank
+164:transition
+165:blank
+166:transition
+167:blank
+168:transition
+169:blank
+170:transition
+171:blank
+172:transition
+
+[scenes] <index> <number|-> <heading>
+1 - Open to a commerical for the company ENERSPHERE.  The commercial is like the satire from robocop but maybe not quite as cutting :).
+2 - Opens to blackness with the tiniest white dot in the middle of the screen.
+3 - The camera moves closer and closer to the white dot until we see it's a man in a suit looking directly at the camera.
+4 - MAN IN SUIT looks around pure black.
+5 - Blackness fast forwards to some disaster in 1986.
+6 - TODO: Finish dis shit
+7 - Powerpoint presentation on the use cases for Anomaly.
+8 - ALEX invented HashCash which "broke" money.  Money is no longer a problem - everyone has infinite money.  Alex thought this would cause emergent behaviors of greed and oppression to dissipate, but people find new ways to introduce class systems, and modes of oppression.
+9 - TODO rewrite the connie chung interview
+10 - - stair case problem
+11 - - Alex wants to hack reality, upend existing power structures, watch it crash and burn.
+
+[outline] <depth> <title>
+1 Act II
+1 Mid Point
+1 Act III
+
+[lint] <rule> <count>
+ambiguous-forced-mark 33
+scene-heading-needs-blank-line 1

@@ -1,0 +1,23 @@
+# Golden digest v1 — do not hand-edit.
+# REGENERATE_GOLDENS=1 swift test --package-path Packages/FountainKit
+source: Rebase/other.fountain
+lines: 2
+elements: 2
+scenes: 0
+sections: 0
+outlineNodes: 0
+characters: 1
+titlePage: none
+
+[cast]
+SPOKESMAN
+
+[kinds] <firstLine>[-<lastLine>]:<elementKind>, one entry per run
+0:character
+1:dialogue
+
+[scenes] <index> <number|-> <heading>
+
+[outline] <depth> <title>
+
+[lint] <rule> <count>

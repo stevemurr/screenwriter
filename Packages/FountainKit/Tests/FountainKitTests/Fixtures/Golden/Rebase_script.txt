@@ -1,0 +1,300 @@
+# Golden digest v1 — do not hand-edit.
+# REGENERATE_GOLDENS=1 swift test --package-path Packages/FountainKit
+source: Rebase/script.fountain
+lines: 280
+elements: 280
+scenes: 12
+sections: 1
+outlineNodes: 1
+characters: 10
+titlePage: Title|Author|Date|Source|Contact
+
+[cast]
+KO
+NEEL
+NEWSCASTER
+UGANDAN CITIZEN
+SPOKESMAN
+SU
+RECEPTIONIST
+JAY
+F-NEEL
+P-NEEL
+
+[kinds] <firstLine>[-<lastLine>]:<elementKind>, one entry per run
+0-8:blank
+9:section
+10:synopsis
+11:blank
+12:sceneHeading
+13:blank
+14:action
+15:blank
+16:transition
+17:blank
+18:sceneHeading
+19:blank
+20:action
+21:blank
+22:transition
+23:blank
+24:sceneHeading
+25:blank
+26:action
+27:blank
+28:transition
+29:blank
+30:sceneHeading
+31:blank
+32:action
+33:blank
+34:sceneHeading
+35:blank
+36:action
+37:blank
+38:character
+39:dialogue
+40:blank
+41:action
+42:blank
+43:character
+44:dialogue
+45:blank
+46:character
+47:dialogue
+48:blank
+49:action
+50:blank
+51:character
+52:dialogue
+53:blank
+54:action
+55:blank
+56:character
+57:dialogue
+58:blank
+59:action
+60:blank
+61:sceneHeading
+62:action
+63:blank
+64:sceneHeading
+65:blank
+66:action
+67:blank
+68:character
+69:dialogue
+70:blank
+71:character
+72:dialogue
+73:blank
+74:action
+75:blank
+76:character
+77:dialogue
+78:blank
+79:action
+80:blank
+81:action
+82:blank
+83:character
+84:dialogue
+85:blank
+86:action
+87:blank
+88:note
+89:blank
+90:character
+91:dialogue
+92:blank
+93:character
+94:parenthetical
+95:dialogue
+96:blank
+97:character
+98:parenthetical
+99:dialogue
+100:blank
+101:character
+102:parenthetical
+103:dialogue
+104:blank
+105:action
+106:blank
+107:character
+108:dialogue
+109:blank
+110:action
+111:blank
+112:character
+113:dialogue
+114:blank
+115:transition
+116:blank
+117:sceneHeading
+118-121:boneyard
+122:blank
+123-124:action
+125:blank
+126:transition
+127:blank
+128:sceneHeading
+129:blank
+130:action
+131:blank
+132:character
+133:dialogue
+134:blank
+135:character
+136:dialogue
+137:blank
+138:character
+139:dialogue
+140:blank
+141:character
+142:parenthetical
+143:dialogue
+144:blank
+145:character
+146:parenthetical
+147:dialogue
+148:blank
+149:character
+150:parenthetical
+151:dialogue
+152:blank
+153:character
+154:parenthetical
+155:dialogue
+156:blank
+157:character
+158:parenthetical
+159:dialogue
+160:blank
+161:character
+162:parenthetical
+163:dialogue
+164:blank
+165:character
+166:parenthetical
+167:dialogue
+168:blank
+169:character
+170:dialogue
+171:blank
+172:character
+173:parenthetical
+174:dialogue
+175:blank
+176:sceneHeading
+177:blank
+178:action
+179:blank
+180:sceneHeading
+181:blank
+182:action
+183:blank
+184:character
+185:dialogue
+186:blank
+187:action
+188:blank
+189:character
+190:dialogue
+191:blank
+192:action
+193:blank
+194:character
+195:parenthetical
+196:dialogue
+197:blank
+198:character
+199:dialogue
+200:blank
+201:character
+202:dialogue
+203:blank
+204:character
+205:parenthetical
+206:dialogue
+207:blank
+208:character
+209:dialogue
+210:blank
+211:action
+212:blank
+213:character
+214:dialogue
+215:blank
+216:character
+217:parenthetical
+218:dialogue
+219:blank
+220:character
+221:dialogue
+222:blank
+223:character
+224:parenthetical
+225:dialogue
+226:blank
+227:character
+228:parenthetical
+229:dialogue
+230:blank
+231:action
+232:note
+233:blank
+234:action
+235:blank
+236:character
+237:dialogue
+238:blank
+239:transition
+240:sceneHeading
+241:blank
+242-245:boneyard
+246:blank
+247:action
+248:blank
+249:character
+250-253:dialogue
+254:blank
+255:action
+256:blank
+257:character
+258:parenthetical
+259:dialogue
+260:blank
+261:character
+262:parenthetical
+263:dialogue
+264:blank
+265:action
+266:blank
+267:character
+268:dialogue
+269:blank
+270:action
+271:blank
+272-279:boneyard
+
+[scenes] <index> <number|-> <heading>
+1 - INT. NEEL'S APARTMENT
+2 - INT. NEEL'S APARTMENT - BEDROOM
+3 - INT. NEEL'S APARTMENT - LIVING ROOM
+4 - INT. NEEL'S APARTMENT - BEDROOM
+5 - INT. NEEL'S APARTMENT - BEDROOM - MORNING
+6 - INT. NEEL'S APARTMENT - BATHROOM - MORNING
+7 - INT. NEEL'S APARTMENT - KITCHEN - MORNING
+8 - INT. NEEL's WORK
+9 - INT. NEEL's WORK - BREAK ROOM
+10 - EXT. REBASE OFFICE
+11 - INT. REBASE OFFICE
+12 - INT. REBASE OFFICE - STAGING ENVIRONMENT
+
+[outline] <depth> <title>
+1 Act 1
+
+[lint] <rule> <count>
+lowercase-scene-heading 2
+scene-heading-needs-blank-line 1

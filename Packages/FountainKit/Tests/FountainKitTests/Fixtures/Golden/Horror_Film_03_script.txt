@@ -1,0 +1,26 @@
+# Golden digest v1 — do not hand-edit.
+# REGENERATE_GOLDENS=1 swift test --package-path Packages/FountainKit
+source: Horror Film 03/script.fountain
+lines: 5
+elements: 5
+scenes: 0
+sections: 5
+outlineNodes: 5
+characters: 0
+titlePage: none
+
+[cast]
+
+[kinds] <firstLine>[-<lastLine>]:<elementKind>, one entry per run
+0-4:section
+
+[scenes] <index> <number|-> <heading>
+
+[outline] <depth> <title>
+1 Maybe it starts like the end of silence of the lambs.  Except the guy gets the girl. Then drags her down to the basement.
+1 Cops arrive and ask if he’s seen anything.
+1 Maybe just copy silence of the lambs.
+1 Maybe copy manhunter?
+1 We start with the ending of silence of the lambs then we pickup a manhunter style story. Where the guy investigates the murder scene trying to find out who the killer was. And where the killer is going.
+
+[lint] <rule> <count>

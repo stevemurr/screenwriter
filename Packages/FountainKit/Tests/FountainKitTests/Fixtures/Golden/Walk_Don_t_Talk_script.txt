@@ -1,0 +1,139 @@
+# Golden digest v1 — do not hand-edit.
+# REGENERATE_GOLDENS=1 swift test --package-path Packages/FountainKit
+source: Walk Don't Talk/script.fountain
+lines: 128
+elements: 128
+scenes: 0
+sections: 0
+outlineNodes: 0
+characters: 3
+titlePage: none
+
+[cast]
+MAL
+SAM
+LANE
+
+[kinds] <firstLine>[-<lastLine>]:<elementKind>, one entry per run
+0:action
+1:blank
+2-4:action
+5:blank
+6:action
+7:blank
+8-9:action
+10:blank
+11:action
+12:blank
+13:action
+14:blank
+15:action
+16:blank
+17-18:action
+19:blank
+20:action
+21:blank
+22:action
+23:blank
+24:action
+25:blank
+26:action
+27:blank
+28:action
+29:blank
+30-31:action
+32:blank
+33:action
+34:blank
+35:character
+36:dialogue
+37:blank
+38:action
+39:blank
+40:action
+41:blank
+42:character
+43:dialogue
+44:blank
+45:action
+46:blank
+47:action
+48:blank
+49:character
+50:dialogue
+51:blank
+52:character
+53:dialogue
+54:blank
+55:action
+56:blank
+57:character
+58:dialogue
+59:blank
+60:action
+61:blank
+62:character
+63:dialogue
+64:blank
+65:character
+66:dialogue
+67:blank
+68:character
+69:dialogue
+70:blank
+71:action
+72:blank
+73:character
+74:dialogue
+75:blank
+76:action
+77:blank
+78:character
+79:dialogue
+80:blank
+81:character
+82:dialogue
+83:blank
+84-89:action
+90:blank
+91:action
+92:blank
+93:character
+94:dialogue
+95:blank
+96:character
+97:dialogue
+98:blank
+99:character
+100:dialogue
+101:blank
+102:character
+103:dialogue
+104:blank
+105:character
+106:dialogue
+107:blank
+108:action
+109:blank
+110:character
+111:dialogue
+112:blank
+113:action
+114:blank
+115:character
+116:dialogue
+117:blank
+118:character
+119:dialogue
+120:blank
+121:action
+122:blank
+123:character
+124:dialogue
+125-127:blank
+
+[scenes] <index> <number|-> <heading>
+
+[outline] <depth> <title>
+
+[lint] <rule> <count>
