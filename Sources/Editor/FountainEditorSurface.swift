@@ -108,6 +108,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
         context.coordinator.host = host
         host.textView.delegate = context.coordinator
         context.coordinator.observeUndo(for: host.textView)
+        context.coordinator.observeViewport(for: host)
         context.coordinator.applyExternalText(text, replacementToken: replacementToken, resetUndo: true)
         context.coordinator.applyMode(mode, fontSize: fontSize)
         context.coordinator.scheduleStyling(
@@ -148,6 +149,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
     public static func dismantleNSView(_ host: EditorHostView, coordinator: Coordinator) {
         coordinator.stylingTask?.cancel()
         coordinator.removeUndoObservers()
+        coordinator.removeViewportObserver()
         host.textView.delegate = nil
     }
 
@@ -162,6 +164,8 @@ public struct FountainEditorSurface: NSViewRepresentable {
         private var appliedMode: EditorMode?
         private var appliedFontSize: CGFloat?
         private var styleKey: StyleKey?
+        private var styledRuns: [ElementStyler.Run]?
+        private var viewportObserver: NSObjectProtocol?
         private var undoObservers: [NSObjectProtocol] = []
 
         private struct StyleKey: Equatable {
@@ -201,6 +205,22 @@ public struct FountainEditorSurface: NSViewRepresentable {
             isEmittingUserEdit = true
             parent.text = source
             isEmittingUserEdit = false
+        }
+
+        func observeViewport(for host: EditorHostView) {
+            guard viewportObserver == nil else { return }
+            viewportObserver = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: host.scrollView.contentView,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.restyleForViewportIfNeeded() }
+            }
+        }
+
+        func removeViewportObserver() {
+            if let viewportObserver { NotificationCenter.default.removeObserver(viewportObserver) }
+            viewportObserver = nil
         }
 
         func observeUndo(for textView: NSTextView) {
@@ -307,17 +327,13 @@ public struct FountainEditorSurface: NSViewRepresentable {
         }
 
         private func applyBaseAttributes() {
-            guard let textView = host?.textView, let storage = textView.textStorage else { return }
+            guard let host else { return }
+            // Through the same scoped path: a full-document write here would
+            // reintroduce the scroll jump on every mode or size change.
             let styler = ElementStyler(mode: parent.mode, fontSize: parent.fontSize)
-            let undoManager = textView.undoManager
-            undoManager?.disableUndoRegistration()
-            storage.setAttributes(
-                styler.baseAttributes(),
-                range: NSRange(location: 0, length: storage.length)
-            )
-            undoManager?.enableUndoRegistration()
-            textView.backgroundColor = Style.editorBackground
-            textView.insertionPointColor = .textColor
+            host.applyStyle(base: styler.baseAttributes(), runs: styledRuns ?? [])
+            host.textView.backgroundColor = Style.editorBackground
+            host.textView.insertionPointColor = .textColor
         }
 
         // MARK: - Styling
@@ -353,28 +369,28 @@ public struct FountainEditorSurface: NSViewRepresentable {
 
         private func applyRuns(_ runs: [ElementStyler.Run], key: StyleKey) {
             guard key == styleKey,
-                  let textView = host?.textView,
-                  textView.string == key.source,
-                  let storage = textView.textStorage
+                  let host,
+                  host.textView.string == key.source
             else { return }
 
-            let selectedRanges = textView.selectedRanges
-            let anchor = currentScrollAnchor()
-            let undoManager = textView.undoManager
-            undoManager?.disableUndoRegistration()
-            defer { undoManager?.enableUndoRegistration() }
-
+            // Held so scrolling can extend styling into newly revealed text
+            // without recomputing the whole document.
+            styledRuns = runs
             let styler = ElementStyler(mode: key.mode, fontSize: key.fontSize)
-            let full = NSRange(location: 0, length: storage.length)
-            storage.beginEditing()
-            storage.setAttributes(styler.baseAttributes(), range: full)
-            for run in runs where NSMaxRange(run.range) <= storage.length {
-                storage.addAttributes(run.attributes, range: run.range)
-            }
-            storage.endEditing()
+            host.applyStyle(base: styler.baseAttributes(), runs: runs)
+        }
 
-            textView.selectedRanges = selectedRanges
-            restoreScroll(anchor: anchor)
+        /// Extends styling when the viewport moves past what is already styled.
+        ///
+        /// Styling covers the laid-out viewport plus a margin, so ordinary
+        /// scrolling costs nothing; only crossing the margin does any work.
+        func restyleForViewportIfNeeded() {
+            guard let host, let runs = styledRuns, let key = styleKey,
+                  host.textView.string == key.source,
+                  host.needsRestyleForViewport()
+            else { return }
+            let styler = ElementStyler(mode: key.mode, fontSize: key.fontSize)
+            host.applyStyle(base: styler.baseAttributes(), runs: runs)
         }
 
         // MARK: - Viewport and caret
@@ -417,11 +433,34 @@ public struct FountainEditorSurface: NSViewRepresentable {
             )
         }
 
+        /// Puts the anchored line back at the *top* of the viewport.
+        ///
+        /// Only for changes that genuinely alter the geometry — loading a
+        /// document, or switching mode, which turns the gutter on or off and
+        /// changes the column width. Restyling preserves the exact origin
+        /// instead; see `EditorHostView.applyStyle`.
+        ///
+        /// `scrollRangeToVisible` is deliberately not used: it scrolls the
+        /// minimum distance to bring the character *into view*, so an anchor
+        /// just off the top lands at the bottom edge and the page appears to
+        /// jump by a screen.
         private func restoreScroll(anchor: EditorScrollAnchor) {
-            guard let textView = host?.textView else { return }
-            let upperBound = (textView.string as NSString).length
-            let location = min(max(anchor.characterOffset, 0), upperBound)
-            textView.scrollRangeToVisible(NSRange(location: location, length: 0))
+            guard let host,
+                  let layout = host.textView.textLayoutManager,
+                  let content = layout.textContentManager
+            else { return }
+
+            let length = (host.textView.string as NSString).length
+            let offset = min(max(anchor.characterOffset, 0), length)
+            guard let location = content.location(content.documentRange.location, offsetBy: offset),
+                  let fragment = layout.textLayoutFragment(for: location)
+            else { return }
+
+            let y = fragment.layoutFragmentFrame.minY + host.textView.textContainerOrigin.y
+            host.scrollView.contentView.scroll(
+                to: NSPoint(x: max(anchor.horizontalOffset, 0), y: max(y, 0))
+            )
+            host.scrollView.reflectScrolledClipView(host.scrollView.contentView)
         }
 
         private func normalizedRanges(_ ranges: [NSRange], utf16Length: Int) -> [NSRange] {

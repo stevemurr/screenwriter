@@ -11,6 +11,8 @@ public final class EditorHostView: NSView {
     let rulerView: LineNumberRulerView
 
     private var showsLineNumbers = true
+    /// The range styling currently covers, so scrolling knows when to extend it.
+    var lastStyledRange: NSRange?
     /// When set, text lays out in a fixed-width column centred in the pane —
     /// the page's 1.5"–7.5" measure, so styled mode reads like a page.
     private var scriptColumnWidth: CGFloat?
@@ -66,6 +68,8 @@ public final class EditorHostView: NSView {
         scrollView.rulersVisible = true
 
         super.init(frame: frameRect)
+        // Styling follows the viewport, so the viewport has to say when it moved.
+        scrollView.contentView.postsBoundsChangedNotifications = true
         addSubview(scrollView)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -240,5 +244,85 @@ final class LineNumberRulerView: NSRulerView {
         let label = "\(number)" as NSString
         let size = label.size(withAttributes: attributes)
         label.draw(at: NSPoint(x: ruleThickness - size.width - 8, y: y), withAttributes: attributes)
+    }
+}
+
+extension EditorHostView {
+
+    /// The character range styling covers: whatever TextKit 2 has laid out for
+    /// the viewport, plus a margin either side.
+    ///
+    /// Styling the whole document was what made typing unusable. Every
+    /// `setAttributes` over the full range invalidates every laid-out fragment,
+    /// so TextKit 2 re-estimates the document's height and the scrollbar jumps —
+    /// on every debounced reparse, which is continuously while typing. TextKit 2
+    /// only lays out the viewport; styling should only cover what it laid out.
+    ///
+    /// The margin means a small scroll does not immediately expose unstyled
+    /// text, and the caret's neighbourhood is always covered.
+    func styledCharacterRange(margin: Int = 6000) -> NSRange {
+        let length = (textView.string as NSString).length
+        guard length > 0 else { return NSRange(location: 0, length: 0) }
+
+        guard let layout = textView.textLayoutManager,
+              let content = layout.textContentManager,
+              let viewport = layout.textViewportLayoutController.viewportRange
+        else {
+            // Not laid out yet — style a bounded window from the top rather than
+            // the whole document.
+            return NSRange(location: 0, length: min(length, margin * 2))
+        }
+
+        let start = content.offset(from: content.documentRange.location, to: viewport.location)
+        let end = content.offset(from: content.documentRange.location, to: viewport.endLocation)
+        let lower = max(start - margin, 0)
+        let upper = min(end + margin, length)
+        return NSRange(location: lower, length: max(upper - lower, 0))
+    }
+
+    /// Applies styling without moving the viewport or the caret.
+    ///
+    /// The scroll position is restored by putting the clip view's origin back
+    /// exactly. The previous approach called `scrollRangeToVisible` on the
+    /// character at the top of the viewport, which scrolls that character *into
+    /// view* — snapping it to an edge rather than leaving the page where it was.
+    func applyStyle(base: [NSAttributedString.Key: Any], runs: [ElementStyler.Run]) {
+        guard let storage = textView.textStorage else { return }
+        let range = styledCharacterRange()
+        guard range.length > 0 else { return }
+
+        let origin = scrollView.contentView.bounds.origin
+        let selection = textView.selectedRanges
+        let undoManager = textView.undoManager
+        undoManager?.disableUndoRegistration()
+        defer { undoManager?.enableUndoRegistration() }
+
+        storage.beginEditing()
+        storage.setAttributes(base, range: range)
+        for run in runs {
+            let overlap = NSIntersectionRange(run.range, range)
+            if overlap.length > 0 { storage.addAttributes(run.attributes, range: overlap) }
+        }
+        storage.endEditing()
+        lastStyledRange = range
+
+        // Only if something actually moved: assigning selection can itself
+        // scroll, so it is not a free no-op.
+        if textView.selectedRanges.map(\.rangeValue) != selection.map(\.rangeValue) {
+            textView.selectedRanges = selection
+        }
+        if scrollView.contentView.bounds.origin != origin {
+            scrollView.contentView.scroll(to: origin)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+    }
+
+    /// True when the viewport has moved far enough that styling no longer covers
+    /// it, so scrolling can re-style without doing so on every frame.
+    func needsRestyleForViewport() -> Bool {
+        guard let last = lastStyledRange else { return true }
+        let current = styledCharacterRange(margin: 0)
+        return !NSLocationInRange(current.location, last)
+            || !NSLocationInRange(max(NSMaxRange(current) - 1, current.location), last)
     }
 }
