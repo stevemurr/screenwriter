@@ -132,3 +132,59 @@ final class TitlePageRoundTripTests: XCTestCase {
         XCTAssertTrue(updated.contains("Credit: Written By"))
     }
 }
+
+/// Replicates exactly what the UI test drives, at the model level, because a
+/// VM round trip is a poor way to debug a parse.
+@MainActor
+final class TitlePageInsertionTests: XCTestCase {
+
+    /// Byte-for-byte what the XCUITest types.
+    private let typed = """
+    INT. GLASS HOUSE - NIGHT
+
+    Rain needles the windows.
+
+    LENA
+    You left the lights on.
+
+    EXT. GARDEN - NIGHT
+
+    Owen waits among the wet sculptures.
+
+    """
+
+    func testAddingATitleKeepsBothScenes() throws {
+        let model = ScreenplayModel()
+        model.load(typed)
+        XCTAssertEqual(model.sceneCount, 2)
+
+        var page = TitlePage()
+        page.setValue("Glass House", for: "Title")
+        model.text = page.applied(to: model.text, existing: model.script.titlePage)
+        model.reparseNow()
+
+        XCTAssertEqual(model.script.titlePage?.title, "Glass House")
+        XCTAssertEqual(
+            model.script.scenes.map(\.heading),
+            ["INT. GLASS HOUSE - NIGHT", "EXT. GARDEN - NIGHT"]
+        )
+        XCTAssertEqual(model.sceneCount, 2, "Adding a title page dropped a scene.")
+    }
+
+    /// The sheet's field is bound per keystroke, so the document sees every
+    /// prefix of the title as it is typed.
+    func testTypingTheTitleOneCharacterAtATime() throws {
+        let model = ScreenplayModel()
+        model.load(typed)
+
+        var page = TitlePage()
+        for count in 1..."Glass House".count {
+            page.setValue(String("Glass House".prefix(count)), for: "Title")
+        }
+        model.text = page.applied(to: model.text, existing: nil)
+        model.reparseNow()
+
+        XCTAssertEqual(model.script.titlePage?.title, "Glass House")
+        XCTAssertEqual(model.sceneCount, 2)
+    }
+}

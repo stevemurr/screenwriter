@@ -207,6 +207,7 @@ private struct StatusBar: View {
             Text("\(model.pageCount) pages")
                 .accessibilityIdentifier("status.pages")
             Text("\(model.sceneCount) scenes")
+                .accessibilityIdentifier("status.scenes")
             Text("\(model.characterCount) characters")
             Text("\(model.wordCount) words")
                 .accessibilityIdentifier("status.words")

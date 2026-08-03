@@ -27,6 +27,22 @@ final class ScreenwriterUITests: XCTestCase {
         return editor
     }
 
+    /// Reads the status bar's scene count by identifier.
+    ///
+    /// Matching `app.staticTexts["2 scenes"]` by label is ambiguous — the same
+    /// string is rendered in the sidebar footer and in the status bar — and an
+    /// ambiguous query is a confusing way to fail.
+    private func sceneCountEquals(_ expected: String, timeout: TimeInterval) -> Bool {
+        let element = app.staticTexts["status.scenes"]
+        guard element.waitForExistence(timeout: timeout) else { return false }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if element.label == expected { return true }
+            usleep(200_000)
+        }
+        return element.label == expected
+    }
+
     private let sample = """
     INT. GLASS HOUSE - NIGHT
 
@@ -56,7 +72,7 @@ final class ScreenwriterUITests: XCTestCase {
             "Scenes should appear in the sidebar as they are typed."
         )
         XCTAssertTrue(app.staticTexts["EXT. GARDEN - NIGHT"].exists)
-        XCTAssertTrue(app.staticTexts["2 scenes"].waitForExistence(timeout: 5))
+        XCTAssertTrue(sceneCountEquals("2 scenes", timeout: 5))
     }
 
     func testSelectingASceneMovesTheCaret() {
@@ -100,7 +116,7 @@ final class ScreenwriterUITests: XCTestCase {
 
         // Only attributes change; the text is what was typed.
         XCTAssertTrue(editor.exists)
-        XCTAssertTrue(app.staticTexts["2 scenes"].exists)
+        XCTAssertTrue(sceneCountEquals("2 scenes", timeout: 5))
     }
 
     func testTitlePageSheetWritesBackIntoTheSource() {
@@ -116,9 +132,14 @@ final class ScreenwriterUITests: XCTestCase {
         title.typeText("Glass House")
         app.sheets.firstMatch.buttons["Done"].click()
 
-        // The block is written into the document, so it shows up in the source.
+        // Wait for the sheet to actually go away: while it is up it is modal,
+        // and the window behind it cannot be queried.
         XCTAssertTrue(
-            app.staticTexts["2 scenes"].waitForExistence(timeout: 10),
+            app.sheets.firstMatch.waitForNonExistence(timeout: 10),
+            "The title page sheet did not dismiss."
+        )
+        XCTAssertTrue(
+            sceneCountEquals("2 scenes", timeout: 10),
             "Adding a title page must not disturb the scenes below it."
         )
     }
