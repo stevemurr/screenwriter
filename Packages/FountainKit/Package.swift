@@ -34,6 +34,10 @@ let package = Package(
             name: "FountainKitTests",
             dependencies: ["FountainKit"],
             path: "Tests/FountainKitTests",
+            // Golden files, not resources. The corpus tests read them through
+            // `#filePath` so they can rewrite them in place under
+            // REGENERATE_GOLDENS=1, which a copied resource bundle could not do.
+            exclude: ["Fixtures"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]

@@ -34,6 +34,11 @@ extension ScriptParser {
         else { return nil }
 
         var entries: [TitlePage.Entry] = []
+        // Where the block actually begins. `Pixelate` opens with a blank line
+        // before `Title:`, and the range must not swallow it — rewriting the
+        // block from the structured inspector replaces exactly this range, and
+        // eating a leading blank would silently edit the user's file.
+        let firstKeyLine = line
         var lastLine = line
 
         while line < index.count, !index[line].isBlank {
@@ -66,10 +71,11 @@ extension ScriptParser {
 
         guard !entries.isEmpty else { return nil }
 
+        let start = index[firstKeyLine].range.location
         let end = index[lastLine].rangeWithTerminator
         return TitlePage(
             entries: entries,
-            range: NSRange(location: 0, length: end.location + end.length)
+            range: NSRange(location: start, length: end.location + end.length - start)
         )
     }
 
@@ -102,6 +108,64 @@ extension ScriptParser {
 }
 
 extension TitlePage {
+    /// Sets a key's value, preserving the entry's position and style.
+    ///
+    /// A new key is appended rather than inserted, because there is no
+    /// meaningful place to put it in someone else's ordering. Setting a value to
+    /// empty removes the entry — an empty `Author:` line is worse than none.
+    public mutating func setValue(_ value: String, for key: String) {
+        let index = entries.firstIndex { $0.key.caseInsensitiveCompare(key) == .orderedSame }
+        let lines = value.components(separatedBy: "\n").filter { !$0.isEmpty }
+
+        guard !lines.isEmpty else {
+            if let index { entries.remove(at: index) }
+            return
+        }
+        if let index {
+            // Keep the author's own key spelling and indentation. `Date:` stays
+            // `Date:` rather than being normalised to `Draft Date:`.
+            entries[index].values = lines
+            if lines.count > 1 { entries[index].isIndented = true }
+        } else {
+            entries.append(
+                TitlePage.Entry(key: key, values: lines, isIndented: lines.count > 1)
+            )
+        }
+    }
+
+    /// Writes this title page back into `source`, replacing the existing block
+    /// or inserting one at the top if the document has none.
+    ///
+    /// Only `range` is replaced, so everything else in the document — including
+    /// any blank line the author left above `Title:` — is untouched.
+    public func applied(to source: String, existing: TitlePage?) -> String {
+        let text = serialized()
+        let ns = source as NSString
+
+        guard let existing else {
+            guard !text.isEmpty else { return source }
+            // A title page must be followed by a blank line, or the first line
+            // of the script would be read as another key.
+            return text + "\n\n" + source
+        }
+
+        guard !text.isEmpty else {
+            // Removing the block takes its trailing blank line with it, so the
+            // document does not accumulate empty space at the top.
+            var cut = existing.range
+            while NSMaxRange(cut) < ns.length,
+                  ns.character(at: NSMaxRange(cut)) == 0x0A {
+                cut.length += 1
+            }
+            return ns.replacingCharacters(in: cut, with: "")
+        }
+        // `range` covers the block's final line terminator, and `serialized()`
+        // does not emit one. Without restoring it the blank line that *ends* the
+        // title page disappears, and the first line of the script silently
+        // becomes another continuation value.
+        return ns.replacingCharacters(in: existing.range, with: text + "\n")
+    }
+
     /// Serialises back to Fountain, preserving key order, inline-versus-indented
     /// style, and each entry's original indentation.
     public func serialized() -> String {

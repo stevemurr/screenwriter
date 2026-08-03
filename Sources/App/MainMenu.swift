@@ -74,6 +74,8 @@ enum MainMenu {
             add(menu, "Save As…", #selector(NSDocument.saveAs(_:)), "s", [.command, .shift])
             add(menu, "Revert to Saved", #selector(NSDocument.revertToSaved(_:)))
             menu.addItem(.separator())
+            add(menu, "Title Page…", #selector(AppDelegate.showTitlePage(_:)), "t", [.command, .shift])
+            menu.addItem(.separator())
             add(menu, "Page Setup…", #selector(NSDocument.runPageLayout(_:)), "p", [.command, .shift])
             add(menu, "Print…", #selector(NSDocument.printDocument(_:)), "p")
         }

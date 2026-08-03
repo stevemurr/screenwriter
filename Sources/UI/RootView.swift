@@ -14,6 +14,7 @@ struct RootView: View {
 
     @State private var session = FountainEditorSession()
     @State private var selection: OutlineSelection?
+    @State private var isEditingTitlePage = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -38,6 +39,12 @@ struct RootView: View {
         }
         .background(Color(nsColor: Style.editorBackground))
         .toolbar { toolbarContent }
+        .sheet(isPresented: $isEditingTitlePage) {
+            TitlePageInspector(model: model)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showTitlePageInspector)) { _ in
+            isEditingTitlePage = true
+        }
         .onChange(of: model.text) { _, _ in
             document.noteTextEdited()
         }
@@ -89,6 +96,15 @@ struct RootView: View {
             }
             .help("Show or hide the page preview")
             .accessibilityIdentifier("toggle.preview")
+        }
+        ToolbarItem {
+            Button {
+                isEditingTitlePage = true
+            } label: {
+                Label("Title Page", systemImage: "doc.badge.gearshape")
+            }
+            .help("Edit the title page")
+            .accessibilityIdentifier("toolbar.titlepage")
         }
     }
 }

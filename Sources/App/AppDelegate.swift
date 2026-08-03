@@ -66,6 +66,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         frontmostModel?.mode = .styled
     }
 
+    @objc func showTitlePage(_ sender: Any?) {
+        guard frontmostModel != nil else { return }
+        NotificationCenter.default.post(name: .showTitlePageInspector, object: nil)
+    }
+
     @objc func showSettings(_ sender: Any?) {
         if let settingsWindow {
             settingsWindow.makeKeyAndOrderFront(nil)
