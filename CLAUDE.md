@@ -7,13 +7,6 @@ format git and Syncthing can actually read.
 
 ## Build & Run
 
-When a UI test fails on a lookup, attach `app.debugDescription` and dump every
-static text with its identifier (see `testDumpAccessibilityTree`) rather than
-guessing at the query. One instrumented run answered what four fix-and-rerun
-attempts did not. And when a fix does not take, check the fix actually landed
-before forming the next hypothesis — a revert that only reverted the test side
-cost three runs of debugging code that had never changed.
-
 ```bash
 # Engine tests — seconds, no Xcode
 swift test --package-path Packages/FountainKit
@@ -37,6 +30,24 @@ swift run -c release --package-path Packages/FountainKit fountain-migrate \
   report ~/Code/github.com/stevemurr/screenplays
 swift run -c release --package-path Packages/FountainKit fountain-migrate \
   profile "path/to/script.fountain"
+```
+
+### Debugging a UI test
+
+A VM round trip is several minutes, so do not spend one on a guess. Attach
+`app.debugDescription` and dump every static text with its identifier — see
+`testDumpAccessibilityTree` — and read the tree. One instrumented run answered
+what four fix-and-rerun attempts had not. And when a fix does not take, confirm
+it actually landed before forming the next hypothesis: a revert that only
+reverted the test side cost three runs spent debugging code that had never
+changed.
+
+Inspect a run with:
+
+```bash
+xcrun xcresulttool get test-results summary --path test-results/<stamp>.xcresult
+xcrun xcresulttool export attachments --path test-results/<stamp>.xcresult \
+  --output-path /tmp/attachments
 ```
 
 `xcodegen generate` after adding or removing any source file — `.xcodeproj` is
