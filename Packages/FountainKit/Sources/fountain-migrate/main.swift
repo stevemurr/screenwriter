@@ -85,11 +85,17 @@ case "profile":
     // Splits parse time between line indexing and everything downstream, so a
     // slow parse can be attributed rather than guessed at.
     let source = try! String(contentsOf: URL(fileURLWithPath: root), encoding: .utf8)
+    // CPU time, not wall clock. CLAUDE.md points at this command as the way to
+    // profile the parser, so a number inflated by whatever else the machine is
+    // doing is a documented path to a wrong conclusion — up to 8x on a busy
+    // machine. Best-of-N rather than mean, for the same reason.
     func time(_ iterations: Int, _ body: () -> Void) -> Double {
         body()
-        let start = DispatchTime.now().uptimeNanoseconds
-        for _ in 0..<iterations { body() }
-        return Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000 / Double(iterations)
+        return (0..<iterations).map { _ -> Double in
+            let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+            body()
+            return Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 1_000_000
+        }.min() ?? .infinity
     }
 
     let bytes = source.utf8.count

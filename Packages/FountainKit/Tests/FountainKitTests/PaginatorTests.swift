@@ -637,10 +637,27 @@ struct PaginatorPerformanceTests {
         // tight enough to catch a real regression. If this fails, the fix is a
         // faster linear pass, not an incremental paginator: nothing in the
         // corpus justifies that complexity yet.
+        // Split by configuration, like the parser's. A single 60ms number was
+        // simultaneously too tight and too loose: debug's worst observed under
+        // load is 44ms — 1.4x headroom — while release CPU is under 6ms, which
+        // is 10x slack and would sit silently through a 4x regression.
+        //
+        // Measured on this machine, best-of-12 CPU while idle: 23.4ms debug,
+        // 5.9ms release. Under concurrent suites those become ~44ms and ~9ms.
+        //
+        // Note CPU time is immune to *preemption*, not to load: it still
+        // inflates roughly 1.4x under concurrency, through cache pressure and
+        // being scheduled onto an efficiency core. Do not re-tune these down to
+        // the idle figures.
+        #if DEBUG
+        let budget: Double = 90
+        #else
+        let budget: Double = 30
+        #endif
         let slowestText = String(format: "%.2f", slowest)
         #expect(
-            slowest < 60,
-            "Pagination took \(slowestText)ms, over the 60ms budget."
+            slowest < budget,
+            "Pagination took \(slowestText)ms CPU, over the budget."
         )
     }
 
@@ -652,9 +669,13 @@ struct PaginatorPerformanceTests {
 
         func measure(_ script: ParsedScript) -> Double {
             _ = Paginator.paginate(script)
-            let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
-            _ = Paginator.paginate(script)
-            return Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 1_000_000
+            // Best of three. This is a ratio test, so a noisy denominator fails
+            // the assertion while the code is perfectly fine.
+            return (0..<3).map { _ -> Double in
+                let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+                _ = Paginator.paginate(script)
+                return Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 1_000_000
+            }.min() ?? .infinity
         }
 
         let one = measure(single)
