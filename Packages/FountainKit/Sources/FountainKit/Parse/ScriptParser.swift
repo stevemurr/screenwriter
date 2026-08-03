@@ -10,16 +10,29 @@ import Foundation
 /// error here; `Linter` reports it separately so the two concerns stay
 /// independently testable.
 ///
-/// Parsing is a single linear pass, measured at ~15ms on the largest script in
-/// the reference library (91 KB). That is too slow to run inline on a keystroke
-/// and comfortably fast enough to run off the main actor behind a debounce,
-/// which is what `ScreenplayModel` does — so there is deliberately no
-/// incremental parser. `ScriptParserPerformanceTests` holds that trade honest.
+/// Parsing is a single linear pass, measured at **1.6ms** on the largest script
+/// in the reference library (91 KB, 3,608 lines), release build, CPU time on an
+/// M1 Max. It runs off the main actor behind `ScreenplayModel`'s 120ms
+/// debounce, so there is deliberately no incremental parser.
+/// `ScriptParserPerformanceTests` holds that trade honest.
 ///
-/// The hot path is per-line and allocation-sensitive. Two rules follow, both
-/// learned by measurement: never use `String.count` or `Character` iteration on
-/// a whole line (they walk grapheme clusters — an ungated `raw.count >= 3` alone
-/// cost 6ms), and never use `String.range(of:)` for a literal marker.
+/// It was 16.8ms until the line index stopped handing every line out as a
+/// bridged `NSString` — see the note on `LineIndex.init(source:)`, which is the
+/// single most important thing to know before touching this file.
+///
+/// The hot path is per-line and allocation-sensitive. Three rules follow, all
+/// learned by measurement:
+///
+/// 1. Never use `String.count` or `Character` iteration on a whole line. They
+///    walk grapheme clusters; an ungated `raw.count >= 3` alone cost 6ms.
+/// 2. Never use `String.range(of:)` for a literal marker — `markerOffset` is
+///    what that is for.
+/// 3. **Iterating `.utf8` is only a fast path on a *native* string.** The
+///    obvious-looking `Character` predicates are worse still: `isLetter`,
+///    `isLowercase` and `isWhitespace` each reach the Unicode property tables
+///    with no ASCII shortcut, and `isEffectivelyUppercase` alone was 34% of
+///    parse CPU because of it. Gate on a byte, fall back to the general case,
+///    and prove the two agree in `ParserFastPathTests`.
 public enum ScriptParser {
     public static func parse(_ source: String) -> ParsedScript {
         let index = LineIndex(source: source)
@@ -101,15 +114,29 @@ public enum ScriptParser {
         index: LineIndex,
         previous: ElementKind?
     ) -> Element {
+        // The forcing marks are all single ASCII scalars, so a line can only
+        // carry one if its first *byte* is that mark's byte. Testing the byte
+        // first means `raw.first` — which breaks a grapheme cluster — and the
+        // `Character` comparisons in the switch below only run on the handful of
+        // lines that could actually match, rather than on every line of the
+        // document. The `Character` tests are kept, not replaced: `#` followed
+        // by a combining mark is one cluster that is *not* `"#"`, and that line
+        // must still fall through to action exactly as it did before.
+        switch raw.utf8.first {
+        case 0x23 /* # */, 0x3D /* = */, 0x21 /* ! */, 0x40 /* @ */,
+             0x7E /* ~ */, 0x3E /* > */, 0x2E /* . */:
+            break
+        default:
+            return classifyUnforced(raw, line: line, index: index, previous: previous)
+        }
         let first = raw.first
 
         // `===` or longer is a page break; a single `=` is a synopsis. Order
         // matters — checking synopsis first would eat every page break.
         //
-        // Gated on the first character, and counted in UTF-8. `String.count` is
-        // a grapheme count, so an ungated `raw.count >= 3` walked every line of
-        // the document in full before doing anything else — it was the single
-        // largest cost in the parser.
+        // Counted in UTF-8. `String.count` is a grapheme count, so an ungated
+        // `raw.count >= 3` walked every line of the document in full before
+        // doing anything else — it was the single largest cost in the parser.
         if first == "=", raw.utf8.count >= 3, raw.utf8.allSatisfy({ $0 == 0x3D }) {
             return make(.pageBreak, line, text: raw)
         }
@@ -120,11 +147,11 @@ public enum ScriptParser {
                 let depth = raw.prefix { $0 == "#" }.count
                 // `#Act I` with no space after the hash appears in the corpus,
                 // so the space is optional.
-                let title = raw.dropFirst(depth).trimmingCharacters(in: .whitespaces)
+                let title = trimmedWhitespace(raw.dropFirst(depth))
                 return make(.section, line, text: title, mark: "#", depth: depth)
 
             case "=":
-                let text = raw.dropFirst().trimmingCharacters(in: .whitespaces)
+                let text = trimmedWhitespace(raw.dropFirst())
                 return make(.synopsis, line, text: text, mark: "=")
 
             case "!":
@@ -137,9 +164,9 @@ public enum ScriptParser {
                 return make(.lyrics, line, text: String(raw.dropFirst()), mark: "~")
 
             case ">":
-                let body = raw.dropFirst().trimmingCharacters(in: .whitespaces)
+                let body = trimmedWhitespace(raw.dropFirst())
                 if body.hasSuffix("<") {
-                    let centered = body.dropLast().trimmingCharacters(in: .whitespaces)
+                    let centered = trimmedWhitespace(body.dropLast())
                     return make(.centered, line, text: centered, mark: ">")
                 }
                 return make(.transition, line, text: body, mark: ">")
@@ -158,9 +185,21 @@ public enum ScriptParser {
             }
         }
 
+        // `..` and `#` -with-a-combining-mark both land here: the line opened
+        // with a mark byte but is not forced after all.
+        return classifyUnforced(raw, line: line, index: index, previous: previous)
+    }
+
+    /// Everything that does not depend on a leading forcing mark.
+    private static func classifyUnforced(
+        _ raw: String,
+        line: LineIndex.Line,
+        index: LineIndex,
+        previous: ElementKind?
+    ) -> Element {
         // A line that is entirely a note.
         if raw.hasPrefix("[["), raw.hasSuffix("]]") {
-            let body = raw.dropFirst(2).dropLast(2).trimmingCharacters(in: .whitespaces)
+            let body = trimmedWhitespace(raw.dropFirst(2).dropLast(2))
             return make(.note, line, text: body)
         }
 
@@ -196,7 +235,9 @@ public enum ScriptParser {
 
     // MARK: - Element predicates
 
-    private static let sceneHeadingPrefixes = [
+    /// Internal rather than private so `ParserFastPathTests` can hold the
+    /// first-byte gate in `isSceneHeading` honest against the table itself.
+    static let sceneHeadingPrefixes = [
         "INT./EXT.", "INT/EXT.", "INT./EXT", "INT/EXT", "I/E.", "I/E",
         "INT.", "INT ", "EXT.", "EXT ", "EST.", "EST "
     ]
@@ -208,8 +249,18 @@ public enum ScriptParser {
     /// Compares byte-wise against an already-uppercase prefix table rather than
     /// uppercasing the line. This runs on every line, and `uppercased()` was
     /// allocating a full copy of each one to look at its first nine characters.
+    ///
+    /// Gated on the first byte first. Every prefix in the table begins `I` or
+    /// `E`, so a line starting with anything else cannot be a heading — and
+    /// without the gate every one of those lines walked all twelve prefixes,
+    /// building a fresh UTF-8 iterator each time. `ParserFastPathTests` pins
+    /// the invariant the gate depends on, so adding a prefix that starts with some
+    /// other letter fails loudly rather than silently never matching.
     public static func isSceneHeading(_ text: String) -> Bool {
-        sceneHeadingPrefixes.contains { hasUppercasedPrefix(text, $0) }
+        guard let first = text.utf8.first else { return false }
+        let upper = (first >= 0x61 && first <= 0x7A) ? first - 32 : first
+        guard upper == 0x49 /* I */ || upper == 0x45 /* E */ else { return false }
+        return sceneHeadingPrefixes.contains { hasUppercasedPrefix(text, $0) }
     }
 
     /// True when `text` begins with `prefix`, ignoring ASCII case. `prefix` must
@@ -225,7 +276,25 @@ public enum ScriptParser {
     }
 
     /// UTF-8 offset of a two-byte marker such as `/*`, or nil.
+    ///
+    /// Every line of the document is scanned for `/*` whether or not the script
+    /// has a boneyard anywhere in it, so this is one of the few places where the
+    /// difference between a `String.UTF8View` iterator and a raw pointer walk is
+    /// worth spelling out. `LineIndex` guarantees a native line, so the
+    /// contiguous path is the one that runs; the iterator loop stays as the
+    /// fallback for a foreign string handed in from elsewhere.
     public static func markerOffset(_ text: String, _ first: UInt8, _ second: UInt8, from start: Int = 0) -> Int? {
+        let contiguous: Int?? = text.utf8.withContiguousStorageIfAvailable { bytes in
+            var offset = max(start, 0) + 1
+            let count = bytes.count
+            while offset < count {
+                if bytes[offset] == second, bytes[offset - 1] == first { return offset - 1 }
+                offset += 1
+            }
+            return Int?.none
+        }
+        if let contiguous { return contiguous }
+
         var previous: UInt8 = 0
         var offset = 0
         for byte in text.utf8 {
@@ -251,7 +320,7 @@ public enum ScriptParser {
         var name = text
         if name.hasSuffix("^") { name = String(name.dropLast()) }
         if let open = name.firstIndex(of: "(") { name = String(name[name.startIndex..<open]) }
-        name = name.trimmingCharacters(in: .whitespaces)
+        name = trimmedWhitespace(name)
         guard !name.isEmpty else { return false }
         // A cue is a name, not a sentence. This keeps a shouted line of action
         // from being promoted to a cue. UTF-8 rather than grapheme count: this
@@ -262,7 +331,34 @@ public enum ScriptParser {
 
     /// True when every cased letter is uppercase and at least one letter exists.
     /// Digits, punctuation, and accents pass through untested.
+    ///
+    /// ASCII is decided byte-wise. `Character.isLetter` and `Character.isLowercase`
+    /// have no ASCII shortcut — each one reaches
+    /// `_swift_stdlib_getBinaryProperties` to look the scalar up in the Unicode
+    /// property tables — and this predicate runs on every line that follows a
+    /// blank one, up to twice (once via `isTransition`, once via
+    /// `isCharacterCue`). Measured on the 91 KB script it was **34% of total
+    /// parse CPU**, the largest single cost left after line indexing.
+    ///
+    /// The first byte over 0x7F hands the *whole* string back to the Unicode
+    /// loop, so accented and non-Latin text still gets the full answer. Bailing
+    /// out mid-string is safe because the fast loop only ever returns early on
+    /// an ASCII lowercase letter, and the Unicode loop would reach that same
+    /// letter and return false too. `ParserFastPathTests` checks the two
+    /// against each other over every scalar up to U+2FFF and the whole corpus.
     public static func isEffectivelyUppercase(_ text: String) -> Bool {
+        var sawLetter = false
+        for byte in text.utf8 {
+            if byte >= 0x80 { return isEffectivelyUppercaseUnicode(text) }
+            if byte >= 0x61, byte <= 0x7A { return false }
+            if byte >= 0x41, byte <= 0x5A { sawLetter = true }
+        }
+        return sawLetter
+    }
+
+    /// The general case, kept verbatim so the ASCII path above has something to
+    /// be checked against.
+    private static func isEffectivelyUppercaseUnicode(_ text: String) -> Bool {
         var sawLetter = false
         for character in text where character.isLetter {
             sawLetter = true
@@ -273,16 +369,50 @@ public enum ScriptParser {
 
     // MARK: - Fragments
 
+    /// `trimmingCharacters(in: .whitespaces)`, with the Foundation call skipped
+    /// when the ends of the string prove there is nothing to trim.
+    ///
+    /// The parser makes 2,895 of these calls on the 91 KB script — 0.8 per
+    /// source line — and 2,439 of them return the string unchanged. Not one of
+    /// them has a non-ASCII byte at either end. `trimmingCharacters` walks
+    /// grapheme clusters and asks a `CharacterSet` about each one, so paying
+    /// that to discover there was nothing to do was most of the cost.
+    ///
+    /// `CharacterSet.whitespaces` is space, tab, and the Unicode space
+    /// separators — and every one of those separators is multi-byte in UTF-8.
+    /// So a leading or trailing byte under 0x80 that is neither 0x20 nor 0x09 is
+    /// definitively not in the set, and neither is the grapheme cluster it
+    /// belongs to, whose first scalar is exactly that byte.
+    static func trimmedWhitespace(_ text: String) -> String {
+        guard let first = text.utf8.first, let last = text.utf8.last else { return text }
+        if first < 0x80, last < 0x80,
+           first != 0x20, first != 0x09, last != 0x20, last != 0x09 {
+            return text
+        }
+        return text.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// The `Substring` half of the pair. `StringProtocol` cannot express this
+    /// once: its `UTF8View` is only known to be a `Collection`, so `last` is not
+    /// available on it.
+    static func trimmedWhitespace(_ text: Substring) -> String {
+        guard let first = text.utf8.first, let last = text.utf8.last else { return String(text) }
+        if first < 0x80, last < 0x80,
+           first != 0x20, first != 0x09, last != 0x20, last != 0x09 {
+            return String(text)
+        }
+        return text.trimmingCharacters(in: .whitespaces)
+    }
+
     /// Splits a trailing `#42#` scene number off a heading.
     public static func splitSceneNumber(_ text: String) -> (heading: String, number: String?) {
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        let trimmed = trimmedWhitespace(text)
         guard trimmed.hasSuffix("#"), trimmed.count > 2 else { return (trimmed, nil) }
         let withoutTrailing = trimmed.dropLast()
         guard let openIndex = withoutTrailing.lastIndex(of: "#") else { return (trimmed, nil) }
         let number = String(withoutTrailing[withoutTrailing.index(after: openIndex)...])
         guard !number.isEmpty, !number.contains(" ") else { return (trimmed, nil) }
-        let heading = String(withoutTrailing[withoutTrailing.startIndex..<openIndex])
-            .trimmingCharacters(in: .whitespaces)
+        let heading = trimmedWhitespace(withoutTrailing[withoutTrailing.startIndex..<openIndex])
         return (heading, number)
     }
 
@@ -291,11 +421,11 @@ public enum ScriptParser {
         line: LineIndex.Line,
         mark: Character?
     ) -> Element {
-        var body = text.trimmingCharacters(in: .whitespaces)
+        var body = trimmedWhitespace(text)
         var dual = false
         if body.hasSuffix("^") {
             dual = true
-            body = String(body.dropLast()).trimmingCharacters(in: .whitespaces)
+            body = trimmedWhitespace(body.dropLast())
         }
         return make(.character, line, text: body, mark: mark, isDual: dual)
     }
@@ -306,7 +436,7 @@ public enum ScriptParser {
         var name = cueText
         if name.hasSuffix("^") { name = String(name.dropLast()) }
         if let open = name.firstIndex(of: "(") { name = String(name[name.startIndex..<open]) }
-        return name.trimmingCharacters(in: .whitespaces)
+        return trimmedWhitespace(name)
     }
 
     private static func make(

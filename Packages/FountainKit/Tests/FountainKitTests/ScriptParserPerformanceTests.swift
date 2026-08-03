@@ -4,12 +4,16 @@ import Testing
 
 /// The parser is a full linear reparse, not an incremental one. That is only
 /// defensible because `ScreenplayModel` runs it **off the main actor behind a
-/// coalescing debounce** — measured at ~15ms on the largest script in the
-/// reference library, an inline reparse per keystroke would drop frames.
+/// coalescing debounce** — and it is comfortable rather than marginal now that
+/// the largest script in the reference library parses in ~1.6ms rather than
+/// ~16.8ms.
 ///
 /// This suite guards the two properties that decision rests on: the parse stays
 /// well inside the debounce window, and it stays linear. If either fails,
 /// incremental parsing stops being premature optimisation and becomes required.
+///
+/// The equivalence of the fast paths that got it there lives next door, in
+/// `ParserFastPathTests`. Speed without that is not worth having.
 @Suite("Parser performance")
 struct ScriptParserPerformanceTests {
 
@@ -55,18 +59,23 @@ struct ScriptParserPerformanceTests {
         // The budget is the 120ms debounce in `ScreenplayModel`, not a frame:
         // the parse runs off the main actor, so it never blocks typing.
         //
-        // Measured in isolation on this machine: 16ms optimised, 30ms
-        // unoptimised. The budget differs by configuration because otherwise it
-        // measures the compiler rather than the parser — a single number either
-        // fails spuriously in debug or is too loose to catch anything in
-        // release. Both leave enough headroom for a slower machine while still
-        // catching a real regression: an earlier version of this parser took
-        // 25ms optimised, because `String.count` — a grapheme count — ran over
-        // every line of the document.
+        // Measured in isolation on an M1 Max: **1.6ms optimised, 9.4ms
+        // unoptimised**. The budget differs by configuration because otherwise
+        // it measures the compiler rather than the parser — a single number
+        // either fails spuriously in debug or is too loose to catch anything in
+        // release.
+        //
+        // These numbers were 16.8ms and 30ms until every line stopped being a
+        // bridged `NSString`; see `ParserFastPathTests`. The budget came down
+        // with them deliberately. A budget of 40ms against a 1.6ms parse would
+        // let a twenty-five-fold regression through in silence, which is how the
+        // `String.count` regression survived as long as it did. What is left is
+        // roughly 5x headroom in release and 3x in debug — enough for a slower
+        // machine, not enough to hide a mistake.
         #if DEBUG
-        let budget: Double = 90
+        let budget: Double = 30
         #else
-        let budget: Double = 40
+        let budget: Double = 8
         #endif
         let slowestText = String(format: "%.2f", slowest)
         #expect(
