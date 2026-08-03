@@ -45,6 +45,8 @@ enum OutlineSelection: Hashable {
 /// hides itself when empty rather than showing a blank header.
 struct OutlineSidebar: View {
     let script: ParsedScript
+    /// Scene lengths in eighths of a page, when pagination has caught up.
+    let metrics: [Int: SceneMetric]
     @Binding var selection: OutlineSelection?
     @State private var filter = ""
 
@@ -95,7 +97,7 @@ struct OutlineSidebar: View {
                     if !filteredScenes.isEmpty {
                         Section("SCENES") {
                             ForEach(filteredScenes) { scene in
-                                SceneRow(scene: scene)
+                                SceneRow(scene: scene, metric: metrics[scene.index])
                                     .tag(OutlineSelection.scene(scene.index))
                             }
                         }
@@ -178,6 +180,7 @@ private struct SectionRow: View {
 
 private struct SceneRow: View {
     let scene: ScriptScene
+    let metric: SceneMetric?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -195,6 +198,12 @@ private struct SceneRow: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                }
+                if let metric {
+                    // Eighths of a page — how a schedule measures a scene.
+                    Text(metric.lengthDescription)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tertiary)
                 }
             }
         }

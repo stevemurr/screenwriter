@@ -20,7 +20,11 @@ struct RootView: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 if model.showsOutline {
-                    OutlineSidebar(script: model.script, selection: $selection)
+                    OutlineSidebar(
+                        script: model.script,
+                        metrics: model.sceneMetrics,
+                        selection: $selection
+                    )
                         .frame(width: 260)
                     Divider()
                 }
@@ -30,8 +34,12 @@ struct RootView: View {
 
                 if model.showsPreview {
                     Divider()
-                    ContinuousPreview(script: model.script)
-                        .frame(minWidth: 320)
+                    PagePreview(
+                        paginated: model.paginated,
+                        caretOffset: caretOffset,
+                        showsPages: $model.previewShowsPages
+                    )
+                    .frame(minWidth: 340)
                 }
 
                 if model.showsInspector {
@@ -157,6 +165,8 @@ private struct StatusBar: View {
                 isExpanded: $model.showsDiagnostics
             )
             Spacer()
+            Text("\(model.pageCount) pages")
+                .accessibilityIdentifier("status.pages")
             Text("\(model.sceneCount) scenes")
             Text("\(model.characterCount) characters")
             Text("\(model.wordCount) words")

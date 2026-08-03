@@ -30,6 +30,11 @@ public final class ScreenplayModel {
     /// Non-blocking advice about the document. Computed alongside the parse and
     /// off the same actor, because the two always have to agree about ranges.
     public private(set) var diagnostics: [Diagnostic] = []
+    /// The script laid out into US-Letter pages. Same engine that drives export,
+    /// so the preview predicts the PDF rather than approximating it.
+    public private(set) var paginated: PaginatedScript?
+    public var printSettings = PrintSettings.highland
+    public var previewShowsPages = true
     public var showsDiagnostics = false
     /// Bumped on every reparse so the editor surface knows the styling is stale.
     public private(set) var revision: UInt64 = 0
@@ -144,7 +149,7 @@ public final class ScreenplayModel {
     public func load(_ source: String) {
         text = source
         parseTask?.cancel()
-        applyParse(ScriptParser.parse(source), for: source)
+        apply(Self.analyse(source, settings: printSettings), for: source)
         replacementToken &+= 1
     }
 
@@ -159,22 +164,43 @@ public final class ScreenplayModel {
     private func scheduleReparse() {
         parseTask?.cancel()
         let source = text
+        let settings = printSettings
         parseTask = Task { [weak self] in
             try? await Task.sleep(for: Self.debounce)
             guard !Task.isCancelled else { return }
-            let parsed = await Task.detached(priority: .userInitiated) {
-                ScriptParser.parse(source)
+            let analysis = await Task.detached(priority: .userInitiated) {
+                ScreenplayModel.analyse(source, settings: settings)
             }.value
             guard !Task.isCancelled else { return }
-            self?.applyParse(parsed, for: source)
+            self?.apply(analysis, for: source)
         }
     }
 
-    private func applyParse(_ parsed: ParsedScript, for source: String) {
+    /// Everything derived from one snapshot of the text, computed together so
+    /// the three can never disagree about ranges.
+    private struct Analysis: Sendable {
+        var script: ParsedScript
+        var diagnostics: [Diagnostic]
+        var paginated: PaginatedScript
+    }
+
+    /// Nonisolated so it can run on a detached task: this is the expensive work,
+    /// and none of it touches the main actor.
+    private nonisolated static func analyse(_ source: String, settings: PrintSettings) -> Analysis {
+        let script = ScriptParser.parse(source)
+        return Analysis(
+            script: script,
+            diagnostics: Linter.lint(script),
+            paginated: Paginator.paginate(script, settings: settings)
+        )
+    }
+
+    private func apply(_ analysis: Analysis, for source: String) {
         // Discard a result the document has already moved past.
         guard text == source else { return }
-        script = parsed
-        diagnostics = Linter.lint(parsed)
+        script = analysis.script
+        diagnostics = analysis.diagnostics
+        paginated = analysis.paginated
         resolve()
         revision &+= 1
     }
@@ -200,18 +226,28 @@ public final class ScreenplayModel {
     /// that must act on a current parse, such as export.
     public func reparseNow() {
         parseTask?.cancel()
-        applyParse(ScriptParser.parse(text), for: text)
+        apply(Self.analyse(text, settings: printSettings), for: text)
     }
 
     // MARK: - Derived, for the status bar and sidebar
 
-    public var pageCountEstimate: Int {
-        // A real paginator lands in M5. Until then the status bar shows an
-        // honest estimate from the line count rather than a fabricated number.
-        max(1, Int((Double(script.elements.count) / 55.0).rounded(.up)))
+    /// Body pages, excluding the title page — what a writer means by "how long
+    /// is it".
+    public var pageCount: Int { paginated?.bodyPageCount ?? 0 }
+
+    /// How long a scene runs, in eighths of a page.
+    public func metric(forSceneAt index: Int) -> SceneMetric? {
+        paginated?.scenes.first { $0.sceneIndex == index }
     }
 
     public var sceneCount: Int { script.scenes.count }
     public var characterCount: Int { script.characters.count }
     public var wordCount: Int { script.wordCount }
+}
+
+extension ScreenplayModel {
+    /// Scene lengths keyed by scene index, for the sidebar.
+    public var sceneMetrics: [Int: SceneMetric] {
+        Dictionary(uniqueKeysWithValues: (paginated?.scenes ?? []).map { ($0.sceneIndex, $0) })
+    }
 }

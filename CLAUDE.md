@@ -163,6 +163,17 @@ Things that were assumed and turned out to be wrong, so do not re-assume them:
   `The Gig Economy/The Gig Economy Script.highland` was written back after a
   lossy UTF-8 round trip; 138 bytes became U+FFFD and every offset after them
   shifted. `/usr/bin/unzip` fails on it too. Failing loudly on it is correct.
+- **Sections do not print.** Highland's own `resources/settings.json` says
+  `printSections: true`, and across nineteen of the user's exports there is not a
+  single printed section line. `PrintSettings.printSections` therefore defaults
+  **off**. When a settings file and the exports disagree, the exports win — they
+  are what the user actually looked at.
+- **The column measures are not symmetric and not derivable.** Measured from the
+  longest line Highland ever drew at each x: **63 / 34 / 29 (parentheticals hang
+  to 27) / 55 for headings**. Deriving dialogue as inset symmetrically about the
+  action column gives 35 — one too many — and re-wraps about one dialogue line in
+  twelve.
+- **`linesPerPage` is 55**, not 56. An earlier `+ 1` counted the first line twice.
 - Six Trophy Boyz episodes write sluglines as `## N. EXT. RAVINE - DAY` — 42 of
   them, with **zero real scene headings in between**, so the parser sees no
   scenes at all and Highland prints none of them. This is what the

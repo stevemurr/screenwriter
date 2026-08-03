@@ -13,9 +13,34 @@ import FountainKit
 /// call is needed. This type only resolves and validates.
 public enum ScreenplayFont {
     /// PostScript names, in the order the system is asked for them.
-    private static let regularCandidates = ["CourierPrime", "Courier Prime", "CourierPrime-Regular"]
+    ///
+    /// The bundled face's PostScript name is `CourierPrime-Regular`; the bare
+    /// `CourierPrime` does **not** resolve, and `Courier Prime` works only
+    /// because it is the family name. This matters beyond `NSFont`, which
+    /// returns nil on a bad name: SwiftUI's `Font.custom` silently falls back to
+    /// the system font instead, so a wrong name here renders the whole page
+    /// preview in a proportional typeface with nothing to indicate why.
+    private static let regularCandidates = ["CourierPrime-Regular", "Courier Prime"]
     private static let boldCandidates = ["CourierPrime-Bold", "Courier Prime Bold"]
     private static let italicCandidates = ["CourierPrime-Italic", "Courier Prime Italic"]
+
+    /// The PostScript name that actually resolved, for anything that takes a
+    /// font by name rather than by instance — SwiftUI's `Font.custom`, chiefly.
+    /// Never guess this string; ask for it.
+    public static var postScriptName: String {
+        regularCandidates.first { NSFont(name: $0, size: 12) != nil } ?? "Courier New"
+    }
+
+    public static func postScriptName(bold: Bool = false, italic: Bool = false) -> String {
+        let candidates: [String]
+        switch (bold, italic) {
+        case (true, true): candidates = ["CourierPrime-BoldItalic"]
+        case (true, false): candidates = boldCandidates
+        case (false, true): candidates = italicCandidates
+        case (false, false): candidates = regularCandidates
+        }
+        return candidates.first { NSFont(name: $0, size: 12) != nil } ?? postScriptName
+    }
 
     /// True when the bundled font actually registered. Surfaced in Settings so a
     /// packaging mistake shows up as a visible warning rather than as PDFs that
