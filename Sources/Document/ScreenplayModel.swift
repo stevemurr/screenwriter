@@ -27,6 +27,10 @@ public final class ScreenplayModel {
     private static let debounce = Duration.milliseconds(120)
 
     public private(set) var script: ParsedScript = .empty
+    /// Non-blocking advice about the document. Computed alongside the parse and
+    /// off the same actor, because the two always have to agree about ranges.
+    public private(set) var diagnostics: [Diagnostic] = []
+    public var showsDiagnostics = false
     /// Bumped on every reparse so the editor surface knows the styling is stale.
     public private(set) var revision: UInt64 = 0
     /// Bumped only when the text is replaced from outside — a file load or a
@@ -83,7 +87,25 @@ public final class ScreenplayModel {
         // Discard a result the document has already moved past.
         guard text == source else { return }
         script = parsed
+        diagnostics = Linter.lint(parsed)
         revision &+= 1
+    }
+
+    public var warningCount: Int { diagnostics.count { $0.severity == .warning } }
+    public var suggestionCount: Int { diagnostics.count { $0.severity == .suggestion } }
+
+    /// Applies a diagnostic's suggested fix.
+    ///
+    /// Re-lints synchronously first: the fix is a range into a specific parse,
+    /// and applying it against a document that has moved on would corrupt text
+    /// rather than repair it.
+    public func applyFix(_ diagnostic: Diagnostic) {
+        reparseNow()
+        guard let current = diagnostics.first(where: { $0.id == diagnostic.id }),
+              current.isFixable
+        else { return }
+        text = current.applied(to: text)
+        reparseNow()
     }
 
     /// Forces any pending reparse to complete now. For tests and for anything

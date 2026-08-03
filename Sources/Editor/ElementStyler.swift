@@ -64,6 +64,26 @@ public struct ElementStyler: Sendable {
         }
     }
 
+    /// Underlines what the linter flagged, without changing anything else about
+    /// the line. Applied after the element runs so it layers on top.
+    public func diagnosticRuns(_ diagnostics: [Diagnostic], length: Int) -> [Run] {
+        diagnostics.compactMap { diagnostic in
+            guard diagnostic.range.length > 0,
+                  NSMaxRange(diagnostic.range) <= length
+            else { return nil }
+            return Run(
+                range: diagnostic.range,
+                attributes: [
+                    .underlineStyle: NSUnderlineStyle.patternDot.rawValue
+                        | NSUnderlineStyle.single.rawValue,
+                    .underlineColor: diagnostic.severity == .warning
+                        ? NSColor.systemOrange
+                        : NSColor.tertiaryLabelColor
+                ]
+            )
+        }
+    }
+
     public func runs(for script: ParsedScript) -> [Run] {
         var runs: [Run] = []
         runs.reserveCapacity(script.elements.count * 2)

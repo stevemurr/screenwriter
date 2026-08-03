@@ -72,12 +72,21 @@ struct RootView: View {
             FountainEditorSurface(
                 text: $model.text,
                 script: model.script,
+                diagnostics: model.diagnostics,
                 mode: model.mode,
                 revision: model.revision,
                 replacementToken: model.replacementToken,
                 session: session
             )
             .accessibilityIdentifier("editor.surface")
+
+            if model.showsDiagnostics {
+                DiagnosticsPane(
+                    diagnostics: model.diagnostics,
+                    onSelect: { session.jump(to: $0.range.location) },
+                    onFix: { model.applyFix($0) }
+                )
+            }
         }
     }
 
@@ -111,13 +120,18 @@ struct RootView: View {
 
 /// The counts along the bottom edge, matching the mockups.
 private struct StatusBar: View {
-    let model: ScreenplayModel
+    @Bindable var model: ScreenplayModel
     let session: FountainEditorSession
 
     var body: some View {
         HStack(spacing: 16) {
             Text("Line \(session.state.caretLine), Column \(session.state.caretColumn)")
                 .accessibilityIdentifier("status.caret")
+            DiagnosticsSummary(
+                warnings: model.warningCount,
+                suggestions: model.suggestionCount,
+                isExpanded: $model.showsDiagnostics
+            )
             Spacer()
             Text("\(model.sceneCount) scenes")
             Text("\(model.characterCount) characters")

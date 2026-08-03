@@ -69,6 +69,7 @@ public final class FountainEditorSession {
 public struct FountainEditorSurface: NSViewRepresentable {
     @Binding var text: String
     let script: ParsedScript
+    let diagnostics: [Diagnostic]
     let mode: EditorMode
     /// Bumped by the owner when `script` reflects new content, so the styler
     /// knows to re-run without diffing the whole document.
@@ -81,6 +82,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
     public init(
         text: Binding<String>,
         script: ParsedScript,
+        diagnostics: [Diagnostic],
         mode: EditorMode,
         revision: UInt64,
         replacementToken: UInt64,
@@ -88,6 +90,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
     ) {
         self._text = text
         self.script = script
+        self.diagnostics = diagnostics
         self.mode = mode
         self.revision = revision
         self.replacementToken = replacementToken
@@ -103,7 +106,9 @@ public struct FountainEditorSurface: NSViewRepresentable {
         context.coordinator.observeUndo(for: host.textView)
         context.coordinator.applyExternalText(text, replacementToken: replacementToken, resetUndo: true)
         context.coordinator.applyMode(mode)
-        context.coordinator.scheduleStyling(script: script, mode: mode, revision: revision)
+        context.coordinator.scheduleStyling(
+            script: script, diagnostics: diagnostics, mode: mode, revision: revision
+        )
         return host
     }
 
@@ -129,7 +134,9 @@ public struct FountainEditorSurface: NSViewRepresentable {
 
         context.coordinator.applyMode(mode)
         context.coordinator.applyPendingJump(session.state.pendingJump)
-        context.coordinator.scheduleStyling(script: script, mode: mode, revision: revision)
+        context.coordinator.scheduleStyling(
+            script: script, diagnostics: diagnostics, mode: mode, revision: revision
+        )
     }
 
     public static func dismantleNSView(_ host: EditorHostView, coordinator: Coordinator) {
@@ -300,7 +307,12 @@ public struct FountainEditorSurface: NSViewRepresentable {
 
         // MARK: - Styling
 
-        func scheduleStyling(script: ParsedScript, mode: EditorMode, revision: UInt64) {
+        func scheduleStyling(
+            script: ParsedScript,
+            diagnostics: [Diagnostic],
+            mode: EditorMode,
+            revision: UInt64
+        ) {
             let key = StyleKey(revision: revision, mode: mode, source: script.source)
             guard key != styleKey else { return }
             styleKey = key
@@ -311,7 +323,10 @@ public struct FountainEditorSurface: NSViewRepresentable {
             // view still holds the exact source it was computed from.
             stylingTask = Task { [weak self] in
                 let runs = await Task.detached(priority: .userInitiated) {
-                    ElementStyler(mode: mode).runs(for: script)
+                    let styler = ElementStyler(mode: mode)
+                    let length = (script.source as NSString).length
+                    return styler.runs(for: script)
+                        + styler.diagnosticRuns(diagnostics, length: length)
                 }.value
                 guard !Task.isCancelled else { return }
                 self?.applyRuns(runs, key: key)

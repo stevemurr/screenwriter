@@ -138,12 +138,36 @@ layer, separately and testably — never by refusing to parse.
 50 Highland-exported PDFs. This is the regression suite, not sample data. Tests
 that need it skip when it is absent rather than failing.
 
-Measured facts worth knowing: `anal-informant.fountain` is 91 KB with 95
+Measured facts worth knowing: `anal-informant.fountain` is 3,581 lines with 95
 `#N#`-numbered scenes and 40 sections; `THICK` forces essentially every line
-(597 `!`, 402 `@`, 37 `.`); 39 `.highland` bundles carry `text.fountain` and 19
-carry the older `text.md`; the zip inside is 344 stored + 304 deflated entries.
-Six Trophy Boyz episodes write sluglines as `## 1. EXT. RAVINE - DAY`, which
-Highland silently drops from the PDF — the highest-value lint rule to write.
+(597 `!`, 402 `@`, 37 `.`) and lints completely clean; 39 `.highland` bundles
+carry `text.fountain` and 19 carry the older `text.md`; the zips hold 344 stored
++ 308 deflated entries.
+
+Things that were assumed and turned out to be wrong, so do not re-assume them:
+
+- **The two Highland "generations" are not two shapes.** A document edited across
+  versions carries both the `resources/` sidecars *and* the flat
+  `sprints.json`/`characters.json`. Nothing branches on generation; the reader
+  takes whatever is present. Payload name is independent of layout.
+- **Print settings live in up to three places** — loose in `info.json`'s
+  highland2 namespace, in its `.printOptions`, and in `printSettings`. Only 21 of
+  59 bundles have `resources/settings.json` at all.
+- **`templateName` means two different things.** In `info.json` it is the
+  document template; in `printSettings` it is the print template. Only the first
+  is carried.
+- **The `.textbundle/` root name need not match the filename.** Highland
+  truncates at the last dot, so `Anal Informant - 3.25.highland` wraps
+  `Anal Informant - 3.textbundle/`. Derive it, never assume it.
+- **One bundle in the library is genuinely corrupt.**
+  `The Gig Economy/The Gig Economy Script.highland` was written back after a
+  lossy UTF-8 round trip; 138 bytes became U+FFFD and every offset after them
+  shifted. `/usr/bin/unzip` fails on it too. Failing loudly on it is correct.
+- Six Trophy Boyz episodes write sluglines as `## N. EXT. RAVINE - DAY` — 42 of
+  them, with **zero real scene headings in between**, so the parser sees no
+  scenes at all and Highland prints none of them. This is what the
+  `slugline-as-section` lint rule exists for, and it fires zero times on the
+  loose `.fountain` files because every one of those episodes is a bundle.
 
 `PageLayout` holds Highland's exact page geometry, measured from 48 of their
 PDFs. It is the single source of truth for the styled editor, the preview, and
