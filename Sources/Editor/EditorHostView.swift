@@ -34,7 +34,7 @@ public final class EditorHostView: NSView {
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
-        textView.textContainerInset = NSSize(width: 10, height: 12)
+        textView.textContainerInset = NSSize(width: 14, height: 16)
         textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         textView.minSize = .zero
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
@@ -54,6 +54,7 @@ public final class EditorHostView: NSView {
 
         scrollView = NSScrollView(frame: .zero)
         scrollView.drawsBackground = true
+        scrollView.backgroundColor = Style.editorBackground
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
@@ -109,12 +110,12 @@ public final class EditorHostView: NSView {
         let available = scrollView.contentSize.width
         let inset: CGFloat
         if let column = scriptColumnWidth {
-            inset = max((available - column) / 2, 16)
+            inset = max((available - column) / 2, 24)
         } else {
-            inset = 10
+            inset = 14
         }
         if abs(textView.textContainerInset.width - inset) > 0.5 {
-            textView.textContainerInset = NSSize(width: inset, height: 12)
+            textView.textContainerInset = NSSize(width: inset, height: 16)
             textView.needsLayout = true
         }
     }
@@ -130,7 +131,7 @@ public final class EditorHostView: NSView {
 final class LineNumberRulerView: NSRulerView {
     private weak var textView: NSTextView?
 
-    static let thickness: CGFloat = 44
+    static let thickness: CGFloat = Style.gutterWidth
 
     /// NSRulerView recomputes its own thickness when the scroll view tiles and
     /// consults `requiredThickness` to do it, so assigning `ruleThickness` once
@@ -192,8 +193,10 @@ final class LineNumberRulerView: NSRulerView {
               let content = layout.textContentManager else { return }
 
         let gutter = NSRect(x: 0, y: 0, width: Self.thickness, height: bounds.height)
-        textView.backgroundColor.setFill()
+        Style.chromeBackground.setFill()
         gutter.intersection(rect).fill()
+        Style.separator.withAlphaComponent(0.6).setFill()
+        NSRect(x: Self.thickness - 1, y: rect.minY, width: 1, height: rect.height).fill()
 
         let visibleRect = scrollView?.documentVisibleRect ?? textView.visibleRect
         let origin = textView.textContainerOrigin

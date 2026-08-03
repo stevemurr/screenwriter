@@ -13,13 +13,16 @@ final class DocumentWindowController: NSWindowController {
     init(document: ScreenplayDocument) {
         self.screenplay = document
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
+            contentRect: NSRect(x: 0, y: 0, width: 1480, height: 900),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        window.titlebarAppearsTransparent = false
-        window.minSize = NSSize(width: 720, height: 480)
+        window.titlebarAppearsTransparent = true
+        window.toolbarStyle = .unified
+        window.titleVisibility = .visible
+        window.titlebarSeparatorStyle = .line
+        window.minSize = NSSize(width: 1040, height: 640)
         window.center()
         window.setFrameAutosaveName("ScreenplayWindow")
         window.tabbingMode = .preferred

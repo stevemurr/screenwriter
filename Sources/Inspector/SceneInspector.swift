@@ -26,14 +26,15 @@ struct SceneInspector: View {
 
             if let scene {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 12) {
                         header(scene)
                         metadataSection(scene)
                         castSection(scene)
                         locationSection
                         notesSection
                     }
-                    .padding(14)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
                 ContentUnavailableView(
@@ -44,17 +45,30 @@ struct SceneInspector: View {
                 .controlSize(.small)
             }
         }
-        .background(Color(nsColor: Style.paneBackground))
+        .background(Color(nsColor: Style.inspectorBackground))
         .accessibilityIdentifier("inspector.root")
     }
 
     // MARK: - Sections
 
     private func header(_ scene: ScriptScene) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                Text("SCENE \(scene.number ?? String(scene.index))")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .tracking(0.7)
+
+                Spacer(minLength: 8)
+                statusBadge(record?.status)
+            }
+
             Text(scene.heading)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .textCase(.uppercase)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
             if let tier = sceneIndex.flatMap({ model.matchTier(forSceneAt: $0) }), !tier.isConfident {
                 // Say so rather than presenting a guess as fact.
                 Label(
@@ -65,32 +79,60 @@ struct SceneInspector: View {
                 )
                 .font(.system(size: 10))
                 .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
             }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: Style.elevatedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: Style.cornerRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: Style.cornerRadius)
+                .strokeBorder(Color(nsColor: Style.separator).opacity(0.75))
         }
     }
 
     private func metadataSection(_ scene: ScriptScene) -> some View {
         section("METADATA") {
-            LabeledContent("Scene number", value: scene.number ?? "—")
-
-            Picker("Status", selection: statusBinding) {
-                Text("—").tag(SceneStatus?.none)
-                ForEach(SceneStatus.allCases, id: \.self) { status in
-                    Text(status.rawValue.capitalized).tag(SceneStatus?.some(status))
-                }
+            metadataRow("Scene number") {
+                Text(scene.number ?? String(scene.index))
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
             }
-            .accessibilityIdentifier("inspector.status")
 
-            LabeledContent("Shooting day") {
+            rowDivider
+
+            metadataRow("Status") {
+                Picker("Status", selection: statusBinding) {
+                    Text("—").tag(SceneStatus?.none)
+                    ForEach(SceneStatus.allCases, id: \.self) { status in
+                        Text(status.rawValue.capitalized).tag(SceneStatus?.some(status))
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .fixedSize()
+                .accessibilityIdentifier("inspector.status")
+            }
+
+            rowDivider
+
+            metadataRow("Shooting day") {
                 TextField("—", value: shootingDayBinding, format: .number)
                     .multilineTextAlignment(.trailing)
-                    .frame(width: 70)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .frame(width: 76)
             }
 
-            LabeledContent("Duration") {
+            rowDivider
+
+            metadataRow("Duration") {
                 TextField("0:00", text: durationBinding)
                     .multilineTextAlignment(.trailing)
-                    .frame(width: 70)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .frame(width: 76)
                     .accessibilityIdentifier("inspector.duration")
             }
         }
@@ -102,22 +144,32 @@ struct SceneInspector: View {
                 Text("Nobody speaks in this scene.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 42)
             } else {
                 // Read from the script, not stored: who speaks in a scene is a
                 // fact about the text, and duplicating it would let the two
                 // disagree.
-                ForEach(scene.characters, id: \.self) { name in
-                    HStack(spacing: 8) {
-                        Image(systemName: "person.circle.fill")
-                            .foregroundStyle(.tint)
+                ForEach(Array(scene.characters.enumerated()), id: \.element) { offset, name in
+                    HStack(spacing: 10) {
+                        castAvatar(for: name)
+
                         Text(name)
-                            .font(.system(size: 12))
+                            .font(.system(size: 11, weight: .medium))
+                            .lineLimit(1)
                         Spacer()
                         if let order = billingOrder(for: name) {
                             Text("#\(order)")
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
                                 .foregroundStyle(.tertiary)
                         }
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 43)
+
+                    if offset < scene.characters.count - 1 {
+                        rowDivider
+                            .padding(.leading, 48)
                     }
                 }
             }
@@ -126,28 +178,84 @@ struct SceneInspector: View {
 
     private var locationSection: some View {
         section("LOCATION") {
-            TextField("Location name", text: locationNameBinding)
-            Picker("Interior / exterior", selection: interiorExteriorBinding) {
-                Text("—").tag(InteriorExterior?.none)
-                ForEach(InteriorExterior.allCases, id: \.self) { value in
-                    Text(value.rawValue.uppercased()).tag(InteriorExterior?.some(value))
+            metadataRow("Location") {
+                TextField("Location name", text: locationNameBinding)
+                    .multilineTextAlignment(.trailing)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .frame(maxWidth: 156)
+            }
+
+            rowDivider
+
+            metadataRow("Set name") {
+                TextField("Optional", text: locationSetNameBinding)
+                    .multilineTextAlignment(.trailing)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .frame(maxWidth: 156)
+                    .accessibilityIdentifier("inspector.location.setName")
+            }
+
+            rowDivider
+
+            metadataRow("Interior / exterior") {
+                Picker("Interior / exterior", selection: interiorExteriorBinding) {
+                    Text("—").tag(InteriorExterior?.none)
+                    ForEach(InteriorExterior.allCases, id: \.self) { value in
+                        Text(value.rawValue.uppercased()).tag(InteriorExterior?.some(value))
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .fixedSize()
             }
         }
     }
 
     private var notesSection: some View {
         section("PRODUCTION NOTES") {
-            ForEach(record?.notes ?? [], id: \.self) { note in
-                Text(note.text)
+            let notes = record?.notes ?? []
+
+            if notes.isEmpty {
+                Text("No production notes yet.")
                     .font(.system(size: 11))
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(nsColor: .textBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 42, alignment: .leading)
+            } else {
+                ForEach(Array(notes.enumerated()), id: \.element.id) { offset, note in
+                    Text(note.text)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if offset < notes.count - 1 {
+                        rowDivider
+                    }
+                }
             }
-            Button("Add Note") { addNote() }
-                .controlSize(.small)
+
+            rowDivider
+
+            Button { addNote() } label: {
+                Label("Add Note", systemImage: "plus")
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 11)
+                    .frame(height: 26)
+                    .contentShape(RoundedRectangle(cornerRadius: 5))
+            }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
+                .background {
+                    RoundedRectangle(cornerRadius: 5)
+                        .strokeBorder(Color.accentColor.opacity(0.8))
+                }
+                .padding(12)
                 .accessibilityIdentifier("inspector.addNote")
         }
     }
@@ -156,13 +264,120 @@ struct SceneInspector: View {
         _ title: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .tracking(0.6)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(0.7)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 31)
+
+            rowDivider
             content()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: Style.elevatedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: Style.cornerRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: Style.cornerRadius)
+                .strokeBorder(Color(nsColor: Style.separator).opacity(0.75))
+        }
+    }
+
+    private func metadataRow<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        LabeledContent {
+            content()
+        } label: {
+            Text(title)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 36)
+    }
+
+    private var rowDivider: some View {
+        Rectangle()
+            .fill(Color(nsColor: Style.separator).opacity(0.65))
+            .frame(height: 1)
+    }
+
+    @ViewBuilder
+    private func statusBadge(_ status: SceneStatus?) -> some View {
+        if let status {
+            Text(status.rawValue.uppercased())
+                .font(.system(size: 8, weight: .bold))
+                .tracking(0.5)
+                .padding(.horizontal, 7)
+                .frame(height: 19)
+                .background(Style.color(for: status).opacity(0.16))
+                .foregroundStyle(Style.color(for: status))
+                .clipShape(Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(Style.color(for: status).opacity(0.3))
+                }
+        } else {
+            Text("NO STATUS")
+                .font(.system(size: 8, weight: .semibold))
+                .tracking(0.4)
+                .padding(.horizontal, 7)
+                .frame(height: 19)
+                .foregroundStyle(.tertiary)
+                .background(Color(nsColor: Style.paneBackground))
+                .clipShape(Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(Color(nsColor: Style.separator).opacity(0.75))
+                }
+        }
+    }
+
+    private func castAvatar(for name: String) -> some View {
+        let color = avatarColor(for: name)
+        return Circle()
+            .fill(
+                LinearGradient(
+                    colors: [color, color.opacity(0.65)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .frame(width: 27, height: 27)
+            .overlay {
+                Text(avatarInitials(for: name))
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+            .overlay {
+                Circle()
+                    .strokeBorder(.white.opacity(0.22), lineWidth: 1)
+            }
+            .shadow(color: color.opacity(0.2), radius: 2, y: 1)
+            .accessibilityHidden(true)
+    }
+
+    private func avatarColor(for name: String) -> Color {
+        let colors: [Color] = [.teal, .orange, .indigo, .pink, .green, .blue, .purple]
+        let index = name.utf8.reduce(0) { partial, byte in
+            (partial * 31 + Int(byte)) % colors.count
+        }
+        return colors[index]
+    }
+
+    private func avatarInitials(for name: String) -> String {
+        let words = name.split { !$0.isLetter && !$0.isNumber }
+        guard let first = words.first else { return "?" }
+        if words.count > 1, let last = words.last {
+            return String(first.prefix(1) + last.prefix(1)).uppercased()
+        }
+        return String(first.prefix(2)).uppercased()
     }
 
     // MARK: - Bindings
@@ -205,13 +420,22 @@ struct SceneInspector: View {
             get: { record?.location?.name ?? "" },
             set: { name in
                 edit { record in
-                    if name.isEmpty {
-                        record.location = nil
-                    } else {
-                        var location = record.location ?? SceneLocation(name: name)
-                        location.name = name
-                        record.location = location
-                    }
+                    var location = record.location ?? SceneLocation(name: "")
+                    location.name = name
+                    record.location = locationIsBlank(location) ? nil : location
+                }
+            }
+        )
+    }
+
+    private var locationSetNameBinding: Binding<String> {
+        Binding(
+            get: { record?.location?.setName ?? "" },
+            set: { setName in
+                edit { record in
+                    var location = record.location ?? SceneLocation(name: "")
+                    location.setName = setName.isEmpty ? nil : setName
+                    record.location = locationIsBlank(location) ? nil : location
                 }
             }
         )
@@ -224,10 +448,17 @@ struct SceneInspector: View {
                 edit { record in
                     var location = record.location ?? SceneLocation(name: "")
                     location.interiorExterior = value
-                    record.location = location
+                    record.location = locationIsBlank(location) ? nil : location
                 }
             }
         )
+    }
+
+    private func locationIsBlank(_ location: SceneLocation) -> Bool {
+        location.name.isEmpty
+            && (location.setName?.isEmpty ?? true)
+            && location.interiorExterior == nil
+            && location.unknownFields.isEmpty
     }
 
     private func billingOrder(for name: String) -> Int? {

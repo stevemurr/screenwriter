@@ -32,23 +32,20 @@ enum OutlineSelection: Hashable {
     }
 }
 
-/// The navigator: outline hierarchy, scenes, and cast.
+/// The navigator: a merged act, sequence, and scene hierarchy plus cast.
+/// Fountain `#` and `##` sections form the outline; each scene is placed under
+/// the deepest section that contains it so sequence membership reads directly.
 ///
-/// The mockups show two different sidebars — a flat scene list, and a tree of
-/// Acts over Sequences. They are the same data: Fountain `#` and `##` sections
-/// *are* the act/sequence structure, and the reference corpus already uses them
-/// that way (`# Act One` over `## Beat 1: Mountain Valley Establishing Shots`).
-/// So both appear here, in one list.
-///
-/// Some scripts in the library are *entirely* sections with no scene headings,
-/// and others are entirely scenes with no sections. Each section of this list
-/// hides itself when empty rather than showing a blank header.
+/// Scripts without sections still render as a flat scene list, while outline-
+/// only documents retain their section structure.
 struct OutlineSidebar: View {
     let script: ParsedScript
     /// Scene lengths in eighths of a page, when pagination has caught up.
     let metrics: [Int: SceneMetric]
+    let pageCount: Int
     @Binding var selection: OutlineSelection?
     @State private var filter = ""
+    @State private var collapsedSections: Set<Int> = []
 
     private var filteredScenes: [ScriptScene] {
         guard !filter.isEmpty else { return script.scenes }
@@ -63,43 +60,78 @@ struct OutlineSidebar: View {
         return script.characters.filter { $0.localizedCaseInsensitiveContains(filter) }
     }
 
+    private var fullOutlineTree: [OutlineTreeItem] {
+        OutlineTree.make(from: script)
+    }
+
+    private var outlineTree: [OutlineTreeItem] {
+        guard !filter.isEmpty else { return fullOutlineTree }
+        return OutlineTree.filter(
+            fullOutlineTree,
+            matchingSceneIndices: Set(filteredScenes.map(\.index))
+        )
+    }
+
+    private var visibleOutlineRows: [OutlineTreeRow] {
+        OutlineTree.flatten(
+            outlineTree,
+            collapsedSections: filter.isEmpty ? collapsedSections : []
+        )
+    }
+
+    private var sectionIDs: Set<Int> {
+        Set(OutlineTree.sectionIDs(in: fullOutlineTree))
+    }
+
     private var isEmpty: Bool {
-        filteredScenes.isEmpty && filteredCharacters.isEmpty
-            && (script.sections.isEmpty || !filter.isEmpty)
+        outlineTree.isEmpty && filteredCharacters.isEmpty
     }
 
     var body: some View {
         VStack(spacing: 0) {
             PaneHeader(title: "SCENES") { EmptyView() }
 
-            TextField("Filter scenes", text: $filter)
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.small)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .accessibilityIdentifier("scenes.filter")
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                TextField("Filter scenes", text: $filter)
+                    .textFieldStyle(.plain)
+                    .accessibilityIdentifier("scenes.filter")
+                if !filter.isEmpty {
+                    Button {
+                        filter = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear the scene filter")
+                }
+            }
+            .font(.system(size: 12))
+            .padding(.horizontal, 9)
+            .frame(height: 28)
+            .background(Color(nsColor: Style.elevatedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color(nsColor: Style.separator).opacity(0.75))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
 
             if isEmpty {
                 emptyState
             } else {
                 List(selection: $selection) {
-                    // Filtering is a scene-and-cast search; showing a pruned
-                    // tree alongside it would misrepresent the structure.
-                    if !script.sections.isEmpty, filter.isEmpty {
+                    if !visibleOutlineRows.isEmpty, !script.sections.isEmpty {
                         Section("OUTLINE") {
-                            OutlineGroup(script.sections, children: \.branch) { node in
-                                SectionRow(node: node)
-                                    .tag(OutlineSelection.section(node.elementIndex))
-                            }
+                            outlineRows
                         }
-                    }
-
-                    if !filteredScenes.isEmpty {
-                        Section("SCENES") {
-                            ForEach(filteredScenes) { scene in
-                                SceneRow(scene: scene, metric: metrics[scene.index])
-                                    .tag(OutlineSelection.scene(scene.index))
-                            }
+                    } else if !visibleOutlineRows.isEmpty {
+                        Section {
+                            outlineRows
                         }
                     }
 
@@ -114,28 +146,79 @@ struct OutlineSidebar: View {
                     }
                 }
                 .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
                 .accessibilityIdentifier("scenes.list")
             }
 
             Divider()
             HStack {
-                Text("\(script.scenes.count) scenes")
+                Text("\(pageCount) pages")
                 Spacer()
-                Text("\(script.characters.count) characters")
+                Text("\(script.scenes.count) scenes")
             }
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 12)
             .frame(height: Style.statusBarHeight)
+            .background(Color(nsColor: Style.chromeBackground))
         }
-        .background(Color(nsColor: Style.paneBackground))
+        .background(Color(nsColor: Style.sidebarBackground))
+        .onChange(of: sectionIDs) { _, currentIDs in
+            collapsedSections.formIntersection(currentIDs)
+        }
+    }
+
+    @ViewBuilder
+    private var outlineRows: some View {
+        ForEach(visibleOutlineRows) { row in
+            switch row.item.content {
+            case .section(let node):
+                let isExpanded = !collapsedSections.contains(node.elementIndex)
+                    || !filter.isEmpty
+                SectionRow(
+                    node: node,
+                    sceneCount: row.item.sceneCount,
+                    hasChildren: filter.isEmpty && !row.item.children.isEmpty,
+                    isExpanded: isExpanded,
+                    onToggle: { toggle(node.elementIndex) }
+                )
+                .tag(OutlineSelection.section(node.elementIndex))
+                .listRowInsets(rowInsets(depth: row.depth))
+                .listRowSeparator(.hidden)
+
+            case .scene(let scene):
+                SceneRow(scene: scene, metric: metrics[scene.index])
+                    .tag(OutlineSelection.scene(scene.index))
+                    .listRowInsets(rowInsets(depth: row.depth))
+                    .listRowSeparator(.hidden)
+            }
+        }
+    }
+
+    private func rowInsets(depth: Int) -> EdgeInsets {
+        EdgeInsets(
+            top: 2,
+            leading: 8 + CGFloat(depth) * 14,
+            bottom: 2,
+            trailing: 8
+        )
+    }
+
+    private func toggle(_ elementIndex: Int) {
+        withAnimation(.easeOut(duration: 0.16)) {
+            if collapsedSections.contains(elementIndex) {
+                collapsedSections.remove(elementIndex)
+            } else {
+                collapsedSections.insert(elementIndex)
+            }
+        }
     }
 
     private var emptyState: some View {
         ContentUnavailableView {
             Label(
                 script.scenes.isEmpty && filter.isEmpty ? "No scenes yet" : "No matches",
-                systemImage: "film"
+                systemImage: "doc.text.magnifyingglass"
             )
         } description: {
             Text(
@@ -149,18 +232,174 @@ struct OutlineSidebar: View {
     }
 }
 
-private extension SectionNode {
-    /// `OutlineGroup` uses a nil children collection to mean "leaf", so an empty
-    /// array would render a pointless disclosure triangle on every bottom-level
-    /// section.
-    var branch: [SectionNode]? { children.isEmpty ? nil : children }
+/// A UI-only tree that merges Fountain sections and their scenes in source
+/// order. The parser remains the source of truth; this adapter only decides how
+/// that structure reads in the navigator.
+struct OutlineTreeItem: Identifiable, Hashable {
+    enum ID: Hashable {
+        case section(Int)
+        case scene(Int)
+    }
+
+    enum Content: Hashable {
+        case section(SectionNode)
+        case scene(ScriptScene)
+    }
+
+    let content: Content
+    let children: [OutlineTreeItem]
+    let sourceOffset: Int
+
+    var id: ID {
+        switch content {
+        case .section(let node): .section(node.elementIndex)
+        case .scene(let scene): .scene(scene.index)
+        }
+    }
+
+    var sceneCount: Int {
+        switch content {
+        case .scene: 1
+        case .section: children.reduce(0) { $0 + $1.sceneCount }
+        }
+    }
+}
+
+struct OutlineTreeRow: Identifiable, Hashable {
+    let item: OutlineTreeItem
+    let depth: Int
+
+    var id: OutlineTreeItem.ID { item.id }
+}
+
+enum OutlineTree {
+    static func make(from script: ParsedScript) -> [OutlineTreeItem] {
+        var scenesByOwner: [Int: [ScriptScene]] = [:]
+        var unownedScenes: [ScriptScene] = []
+
+        for scene in script.scenes {
+            if let owner = deepestSection(containing: scene.range.location, in: script.sections) {
+                scenesByOwner[owner.elementIndex, default: []].append(scene)
+            } else {
+                unownedScenes.append(scene)
+            }
+        }
+
+        func makeSection(_ node: SectionNode) -> OutlineTreeItem {
+            let childSections = node.children.map(makeSection)
+            let childScenes = scenesByOwner[node.elementIndex, default: []].map {
+                OutlineTreeItem(
+                    content: .scene($0),
+                    children: [],
+                    sourceOffset: $0.range.location
+                )
+            }
+            return OutlineTreeItem(
+                content: .section(node),
+                children: (childSections + childScenes).sorted { $0.sourceOffset < $1.sourceOffset },
+                sourceOffset: node.range.location
+            )
+        }
+
+        let sections = script.sections.map(makeSection)
+        let scenes = unownedScenes.map {
+            OutlineTreeItem(
+                content: .scene($0),
+                children: [],
+                sourceOffset: $0.range.location
+            )
+        }
+        return (sections + scenes).sorted { $0.sourceOffset < $1.sourceOffset }
+    }
+
+    static func filter(
+        _ items: [OutlineTreeItem],
+        matchingSceneIndices: Set<Int>
+    ) -> [OutlineTreeItem] {
+        items.compactMap { item in
+            switch item.content {
+            case .scene(let scene):
+                return matchingSceneIndices.contains(scene.index) ? item : nil
+            case .section(let node):
+                let children = filter(item.children, matchingSceneIndices: matchingSceneIndices)
+                guard !children.isEmpty else { return nil }
+                return OutlineTreeItem(
+                    content: .section(node),
+                    children: children,
+                    sourceOffset: item.sourceOffset
+                )
+            }
+        }
+    }
+
+    static func flatten(
+        _ items: [OutlineTreeItem],
+        collapsedSections: Set<Int>,
+        depth: Int = 0
+    ) -> [OutlineTreeRow] {
+        items.flatMap { item in
+            var rows = [OutlineTreeRow(item: item, depth: depth)]
+            if case .section(let node) = item.content,
+               !collapsedSections.contains(node.elementIndex) {
+                rows += flatten(
+                    item.children,
+                    collapsedSections: collapsedSections,
+                    depth: depth + 1
+                )
+            }
+            return rows
+        }
+    }
+
+    static func sectionIDs(in items: [OutlineTreeItem]) -> [Int] {
+        items.flatMap { item -> [Int] in
+            switch item.content {
+            case .scene:
+                return []
+            case .section(let node):
+                return [node.elementIndex] + sectionIDs(in: item.children)
+            }
+        }
+    }
+
+    private static func deepestSection(
+        containing sourceOffset: Int,
+        in nodes: [SectionNode]
+    ) -> SectionNode? {
+        for node in nodes where NSLocationInRange(sourceOffset, node.range) {
+            return deepestSection(containing: sourceOffset, in: node.children) ?? node
+        }
+        return nil
+    }
 }
 
 private struct SectionRow: View {
     let node: SectionNode
+    let sceneCount: Int
+    let hasChildren: Bool
+    let isExpanded: Bool
+    let onToggle: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
+            if hasChildren {
+                Button(action: onToggle) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .frame(width: 10, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
+                .accessibilityLabel(isExpanded ? "Collapse \(node.title)" : "Expand \(node.title)")
+                .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+                .accessibilityIdentifier("outline.toggle.\(node.elementIndex)")
+            } else {
+                Color.clear
+                    .frame(width: 10, height: 14)
+                    .accessibilityHidden(true)
+            }
+
             Image(systemName: node.depth == 1 ? "square.stack" : "square.grid.2x2")
                 .foregroundStyle(.tertiary)
                 .font(.system(size: 10))
@@ -168,8 +407,8 @@ private struct SectionRow: View {
                 .font(.system(size: 12, weight: node.depth == 1 ? .semibold : .regular))
                 .lineLimit(1)
             Spacer(minLength: 4)
-            if !node.sceneIndices.isEmpty {
-                Text("\(node.sceneIndices.count)")
+            if sceneCount > 0 {
+                Text("\(sceneCount)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tertiary)
             }
@@ -183,15 +422,16 @@ private struct SceneRow: View {
     let metric: SceneMetric?
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             Text(scene.number ?? "\(scene.index)")
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .foregroundStyle(.tertiary)
-                .frame(minWidth: 20, alignment: .trailing)
+                .frame(minWidth: 18, alignment: .trailing)
+                .padding(.top, 1)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(scene.heading)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .lineLimit(2)
                 if let synopsis = scene.synopsis {
                     Text(synopsis)
@@ -207,6 +447,7 @@ private struct SceneRow: View {
                 }
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
     }
 }

@@ -16,28 +16,39 @@ struct BeatBoardView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 16) {
-                    ForEach(layout.columns) { column in
-                        BoardColumnView(
-                            column: column,
-                            model: model,
-                            selection: $selection,
-                            onDrop: { scene, position in
-                                move(scene: scene, into: column.id, at: position)
+            GeometryReader { geometry in
+                ScrollView([.horizontal, .vertical]) {
+                    HStack(alignment: .top, spacing: 0) {
+                        ForEach(Array(layout.columns.enumerated()), id: \.element.id) { offset, column in
+                            if offset > 0 {
+                                Divider()
+                                    .padding(.vertical, 2)
                             }
-                        )
-                        .frame(width: 260)
+
+                            BoardColumnView(
+                                column: column,
+                                model: model,
+                                selection: $selection,
+                                onDrop: { scene, position in
+                                    move(scene: scene, into: column.id, at: position)
+                                }
+                            )
+                            .padding(.horizontal, 14)
+                            .frame(width: Style.boardColumnWidth)
+                        }
                     }
+                    .frame(minHeight: max(0, geometry.size.height - 36), alignment: .top)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 18)
                 }
-                .padding(16)
+                .accessibilityIdentifier("board.columns")
+                .background(Color(nsColor: Style.canvasBackground))
             }
-            .accessibilityIdentifier("board.columns")
 
             Divider()
             legend
         }
-        .background(Color(nsColor: .underPageBackgroundColor))
+        .background(Color(nsColor: Style.canvasBackground))
     }
 
     private var legend: some View {
@@ -55,7 +66,7 @@ struct BeatBoardView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 14)
         .frame(height: Style.statusBarHeight)
-        .background(Color(nsColor: Style.paneBackground))
+        .background(Color(nsColor: Style.chromeBackground))
     }
 
     private func move(scene: Int, into columnID: Int, at position: Int) {
@@ -85,18 +96,8 @@ private struct BoardColumnView: View {
     @State private var isTargeted = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(column.title.uppercased())
-                    .font(.system(size: 11, weight: .semibold))
-                    .tracking(0.5)
-                    .lineLimit(1)
-                Spacer()
-                Text("\(column.sceneIndices.count)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-            }
-            .foregroundStyle(column.isUnsequenced ? .secondary : .primary)
+        VStack(alignment: .leading, spacing: 12) {
+            columnHeader
 
             ForEach(Array(column.sceneIndices.enumerated()), id: \.element) { position, index in
                 if let scene = model.script.scenes.first(where: { $0.index == index }) {
@@ -118,17 +119,33 @@ private struct BoardColumnView: View {
 
             // The tail of the column accepts a drop meaning "after everything
             // here", which is what makes an empty column reachable at all.
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(
-                    isTargeted ? Color.accentColor : Color(nsColor: Style.separator),
-                    style: StrokeStyle(lineWidth: 1, dash: [4, 3])
-                )
-                .frame(height: 40)
+            RoundedRectangle(cornerRadius: Style.cornerRadius)
+                .fill(isTargeted ? selectionAccent.opacity(0.08) : .clear)
+                .frame(height: column.sceneIndices.isEmpty ? 44 : 28)
                 .overlay {
-                    Text(column.sceneIndices.isEmpty ? "Drop a scene here" : "")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
+                    RoundedRectangle(cornerRadius: Style.cornerRadius)
+                        .strokeBorder(
+                            isTargeted
+                                ? selectionAccent
+                                : Color(nsColor: Style.separator).opacity(0.55),
+                            style: StrokeStyle(
+                                lineWidth: isTargeted ? 1.25 : 1,
+                                dash: [3, 4]
+                            )
+                        )
                 }
+                .overlay {
+                    if column.sceneIndices.isEmpty {
+                        Text("Drop a scene here")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(
+                                isTargeted
+                                    ? selectionAccent
+                                    : Color(nsColor: .tertiaryLabelColor)
+                            )
+                    }
+                }
+                .contentShape(Rectangle())
                 .dropDestination(for: String.self) { items, _ in
                     guard let dropped = items.first.flatMap(Int.init) else { return false }
                     onDrop(dropped, column.sceneIndices.count)
@@ -136,6 +153,41 @@ private struct BoardColumnView: View {
                 } isTargeted: { isTargeted = $0 }
         }
         .accessibilityIdentifier("board.column.\(column.id)")
+    }
+
+    private var columnHeader: some View {
+        VStack(spacing: 9) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(column.title.uppercased())
+                    .font(.system(size: 12, weight: .semibold))
+                    .tracking(0.55)
+                    .lineLimit(1)
+                    .foregroundStyle(column.isUnsequenced ? .secondary : .primary)
+
+                Spacer(minLength: 8)
+
+                Text("\(column.sceneIndices.count)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Color(nsColor: Style.elevatedBackground).opacity(0.7), in: Capsule())
+                    .overlay {
+                        Capsule()
+                            .strokeBorder(Color(nsColor: Style.separator), lineWidth: 1)
+                    }
+            }
+            .padding(.horizontal, 2)
+
+            Rectangle()
+                .fill(Color(nsColor: Style.separator).opacity(0.9))
+                .frame(height: 1)
+        }
+    }
+
+    private var selectionAccent: Color {
+        Color(nsColor: .systemBlue)
     }
 }
 
@@ -146,36 +198,47 @@ private struct SceneCard: View {
     let isSelected: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("SCENE \(scene.number ?? String(scene.index))")
                 .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.tertiary)
+                .tracking(0.25)
+                .foregroundStyle(Style.paperSecondaryInk.opacity(0.82))
 
-            Text(scene.heading)
-                .font(.system(size: 12, weight: .semibold))
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top, spacing: 9) {
+                DragAffordance()
+                    .padding(.top, 2)
 
-            if let synopsis = scene.synopsis {
-                Text(synopsis)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(scene.heading)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Style.paperInk)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
 
-            if !scene.characters.isEmpty {
-                Text(scene.characters.prefix(4).joined(separator: "  "))
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+                    if let synopsis = scene.synopsis {
+                        Text(synopsis)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Style.paperSecondaryInk)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if !scene.characters.isEmpty {
+                        Text(scene.characters.prefix(4).joined(separator: "  "))
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(Style.paperSecondaryInk.opacity(0.9))
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             HStack {
                 if let length {
                     Text(length)
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .foregroundStyle(Style.paperSecondaryInk)
                 }
                 Spacer()
                 if let status {
@@ -183,24 +246,61 @@ private struct SceneCard: View {
                         .font(.system(size: 9, weight: .semibold))
                         .padding(.horizontal, 7)
                         .padding(.vertical, 2)
-                        .background(Style.color(for: status).opacity(0.18))
                         .foregroundStyle(Style.color(for: status))
-                        .clipShape(Capsule())
+                        .background(Style.color(for: status).opacity(0.055), in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .strokeBorder(Style.color(for: status), lineWidth: 1)
+                        }
                 }
             }
         }
-        .padding(10)
+        .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .background {
+            RoundedRectangle(cornerRadius: Style.cornerRadius)
+                .fill(Style.paper)
+        }
         .overlay {
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: Style.cornerRadius)
                 .strokeBorder(
-                    isSelected ? Color.accentColor : Color(nsColor: Style.separator),
+                    isSelected ? selectionAccent : Color.black.opacity(0.14),
                     lineWidth: isSelected ? 2 : 1
                 )
         }
+        .shadow(
+            color: isSelected ? selectionAccent.opacity(0.16) : Color.black.opacity(0.09),
+            radius: isSelected ? 5 : 3,
+            x: 0,
+            y: 2
+        )
+        .contentShape(RoundedRectangle(cornerRadius: Style.cornerRadius))
         .accessibilityIdentifier("board.card.\(scene.index)")
+    }
+
+    private var selectionAccent: Color {
+        Color(nsColor: .systemBlue)
+    }
+}
+
+private struct DragAffordance: View {
+    var body: some View {
+        VStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { _ in
+                HStack(spacing: 3) {
+                    dot
+                    dot
+                }
+            }
+        }
+        .frame(width: 9)
+        .accessibilityHidden(true)
+    }
+
+    private var dot: some View {
+        Circle()
+            .fill(Style.paperSecondaryInk.opacity(0.55))
+            .frame(width: 2.5, height: 2.5)
     }
 }
 

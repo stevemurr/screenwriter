@@ -53,28 +53,39 @@ struct PagePreview: View {
                 .controlSize(.small)
             }
         }
-        .background(Color(nsColor: .underPageBackgroundColor))
+        .background(Color(nsColor: Style.canvasBackground))
     }
 
     private func pageScroller(_ paginated: PaginatedScript) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: showsPages ? 20 : 0) {
-                    ForEach(paginated.pages) { page in
-                        PageCanvas(page: page, layout: layout, separated: showsPages)
+        GeometryReader { geometry in
+            let pagePadding: CGFloat = showsPages ? 20 : 0
+            let availableWidth = max(1, geometry.size.width - pagePadding * 2)
+            let previewScale = min(1, availableWidth / layout.pageWidth)
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: showsPages ? 20 : 0) {
+                        ForEach(paginated.pages) { page in
+                            PageCanvas(
+                                page: page,
+                                layout: layout,
+                                separated: showsPages,
+                                scale: previewScale
+                            )
                             .id(page.index)
+                        }
                     }
+                    .padding(pagePadding)
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(showsPages ? 20 : 0)
-                .frame(maxWidth: .infinity)
-            }
-            .accessibilityIdentifier("preview.pages")
-            .onChange(of: caretOffset) { _, offset in
-                // The preview follows the caret, so typing near a page break
-                // shows the break rather than making the writer hunt for it.
-                guard let index = paginated.pageIndex(forSourceOffset: offset) else { return }
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(index, anchor: .top)
+                .accessibilityIdentifier("preview.pages")
+                .onChange(of: caretOffset) { _, offset in
+                    // The preview follows the caret, so typing near a page break
+                    // shows the break rather than making the writer hunt for it.
+                    guard let index = paginated.pageIndex(forSourceOffset: offset) else { return }
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        proxy.scrollTo(index, anchor: .top)
+                    }
                 }
             }
         }
@@ -87,6 +98,8 @@ private struct PageCanvas: View {
     let layout: PageLayout
     /// Page mode draws a paper card; continuous mode runs the text together.
     let separated: Bool
+    /// Preview-only scaling. Pagination and export retain full-size coordinates.
+    let scale: CGFloat
 
     /// Asked for, never guessed: `Font.custom` fails silently on a bad name.
     private var fontName: String { ScreenplayFont.postScriptName }
@@ -101,13 +114,9 @@ private struct PageCanvas: View {
 
     private var topInset: CGFloat { separated ? 0 : -layout.bodyTop + layout.lineHeight }
 
-    /// A page is paper, in either appearance. Tinting it with the system text
-    /// background would make the preview stop resembling the thing it predicts.
-    static let paper = Color(red: 0.99, green: 0.985, blue: 0.97)
-    static let ink = Color(red: 0.08, green: 0.08, blue: 0.09)
-
     var body: some View {
         Canvas { context, _ in
+            context.scaleBy(x: scale, y: scale)
             for line in page.lines where !line.isBlank {
                 context.draw(
                     Text(styled(line)),
@@ -119,15 +128,15 @@ private struct PageCanvas: View {
                 context.draw(
                     Text(label)
                         .font(.custom(fontName, size: layout.fontSize))
-                        .foregroundColor(Self.ink),
+                        .foregroundColor(Style.paperInk),
                     at: CGPoint(x: layout.pageNumberRight, y: layout.pageNumberBaseline),
                     anchor: .topTrailing
                 )
             }
         }
-        .frame(width: layout.pageWidth, height: height)
-        .background(separated ? Self.paper : .clear)
-        .clipShape(RoundedRectangle(cornerRadius: separated ? 3 : 0))
+        .frame(width: layout.pageWidth * scale, height: height * scale)
+        .background(Style.paper)
+        .clipShape(RoundedRectangle(cornerRadius: separated ? Style.cornerRadius : 0))
         .shadow(color: separated ? .black.opacity(0.22) : .clear, radius: 6, y: 2)
     }
 
@@ -140,7 +149,7 @@ private struct PageCanvas: View {
     private func styled(_ line: PageLine) -> AttributedString {
         var attributed = AttributedString(line.text)
         attributed.font = .custom(fontName, size: layout.fontSize)
-        attributed.foregroundColor = PageCanvas.ink
+        attributed.foregroundColor = Style.paperInk
 
         let utf16 = Array(line.text.utf16)
         for run in line.emphasis {
