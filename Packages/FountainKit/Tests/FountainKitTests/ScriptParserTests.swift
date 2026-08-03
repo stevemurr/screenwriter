@@ -201,3 +201,50 @@ struct StructureTests {
         #expect(cursor == (source as NSString).length)
     }
 }
+
+@Suite("Word count")
+struct WordCountTests {
+
+    /// The `Character`-splitting version this replaced, kept so the two can be
+    /// proved to agree rather than assumed to.
+    private func splitting(_ script: ParsedScript) -> Int {
+        script.elements.reduce(into: 0) { total, element in
+            switch element.kind {
+            case .action, .dialogue, .sceneHeading, .parenthetical, .transition,
+                 .centered, .lyrics, .character:
+                total += element.text.split { $0 == " " || $0 == "\n" || $0 == "\t" }.count
+            default:
+                break
+            }
+        }
+    }
+
+    @Test("The byte scan agrees with splitting on graphemes", arguments: [
+        "INT. A - DAY\n\nHe waits.\n",
+        "INT. A - DAY\n\n  leading and   doubled   spaces  \n",
+        "INT. A - DAY\n\nsmart “quotes” and — dashes and ’apostrophes’\n",
+        "INT. A - DAY\n\ntabs\tbetween\twords\n",
+        "INT. A - DAY\n\ntrailing space \n\nMARA\nHello.\n",
+        "INT. A - DAY\n\n\n\n",
+        "INT. A - DAY\n\ncafé naïve résumé Ω 日本語 🎬 family: 👨‍👩‍👧‍👦\n",
+        "INT. A - DAY\n\ne\u{0301}combining vs \u{00E9}precomposed\n",
+        "# Only a section\n",
+        ""
+    ])
+    func agreesOnEdgeCases(_ source: String) {
+        let script = ScriptParser.parse(source)
+        #expect(script.wordCount == splitting(script))
+    }
+
+    @Test("The byte scan agrees across every script in the corpus")
+    func agreesOnTheCorpus() throws {
+        guard !Corpus.relativePaths.isEmpty else { return Corpus.recordAbsence() }
+        for path in Corpus.relativePaths {
+            let script = ScriptParser.parse(try Corpus.source(of: path))
+            #expect(
+                script.wordCount == splitting(script),
+                "\(path): byte scan and grapheme split disagree."
+            )
+        }
+    }
+}

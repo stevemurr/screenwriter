@@ -256,17 +256,23 @@ public final class ScreenplayModel {
 
     /// Stored, not `script.wordCount`.
     ///
-    /// `ParsedScript.wordCount` is computed: it splits every printable
-    /// element's text on each read, walking grapheme clusters as it goes. That
-    /// measured **14.0ms** on the largest script in the reference library, in a
-    /// release build. The status bar reads it from `StatusBar.body`, and that
-    /// body re-runs on every keystroke because the caret readout beside it
-    /// changes — so a value that can only change once per debounced reparse was
-    /// being recomputed at typing rate, on the main actor.
+    /// `ParsedScript.wordCount` is computed, and the status bar reads it from
+    /// `StatusBar.body` — a body that re-runs on every keystroke, because the
+    /// caret readout beside it changes. So a value that can only change once
+    /// per debounced reparse was being recomputed at typing rate, on the main
+    /// actor.
     ///
-    /// Counting it in `analyse` puts it on the detached task with the parse,
-    /// the lint and the pagination, which is where the rest of the derived data
-    /// is already computed.
+    /// It cost **20.3ms** when this was written. Two later fixes took that to
+    /// **0.23ms**: `LineIndex` stopped producing bridged `NSString`s, which
+    /// alone accounted for 18ms of it, and then `ParsedScript.wordCount` became
+    /// a UTF-8 scan.
+    ///
+    /// Caching a 0.23ms value is a much weaker claim than caching a 20ms one,
+    /// and it is kept on its merits rather than by inertia: the count cannot
+    /// change between reparses, so recomputing it per keystroke is work with a
+    /// provably identical answer, and `analyse` is already assembling the
+    /// parse, the lint and the pagination on a detached task with nowhere
+    /// cheaper to put it. It costs one `Int` and buys back 3% of a frame.
     public private(set) var wordCount: Int = 0
 }
 

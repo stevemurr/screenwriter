@@ -107,9 +107,12 @@ public struct TextBundle: Sendable {
     /// complete dictionary of children, so growing a folder one file at a time
     /// means rebuilding it once per file — quadratic in the files that share a
     /// directory. Measured on this machine, release: 1000 files under `assets/`
-    /// took 1617ms rebuilt per file and 2.96ms built once — and the corpus's own
-    /// heaviest bundle, at 26 extras, 0.32ms against 0.07ms. `NSDocument` calls
-    /// this on every save, so that is a save-time hitch, not a one-off.
+    /// took 1617ms rebuilt per file and 2.96ms built once. Nothing in the
+    /// reference library is near that — its busiest single directory holds 15
+    /// files and its heaviest bundle 29 extras, costing 0.33ms against 0.09ms —
+    /// so the speed of this is invisible today. It is still worth building once,
+    /// because `NSDocument` calls it on every save, so the cliff would be a
+    /// save-time hitch rather than a one-off import cost.
     public func directoryWrapper() throws -> FileWrapper {
         let root = Node()
         root.files[textFileName] = Data(text.utf8)
@@ -149,8 +152,11 @@ public struct TextBundle: Sendable {
                 children[name] = file
             }
             // Folders are added last, so a damaged archive claiming both a file
-            // `bin` and a file `bin/9.txt` resolves to the folder every time
-            // rather than to whichever the dictionary happened to yield last.
+            // `bin` and a file `bin/9.txt` resolves to the folder every time.
+            // The shape this replaced could not even pick one: whichever order
+            // the dictionary yielded, it either lost the folder silently or
+            // called `-[NSFileWrapper fileWrappers]` on a regular-file wrapper,
+            // which raises. See `fileAndFolderCollision`.
             for (name, node) in directories {
                 let directory = node.wrapper()
                 directory.preferredFilename = name

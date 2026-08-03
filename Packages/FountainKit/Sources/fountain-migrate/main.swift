@@ -106,6 +106,12 @@ case "profile":
         for line in index.lines { _ = line.trimmedRight }
     }
 
+    // Derived counts read by the status bar. Separate from the parse because
+    // they are computed per reparse rather than per keystroke, and because a
+    // count is the kind of thing that looks free and is not.
+    let script = ScriptParser.parse(source)
+    let counting = time(20) { _ = script.wordCount }
+
     print("""
     \(URL(fileURLWithPath: root).lastPathComponent) — \(bytes) bytes, \(index.count) lines
 
@@ -115,6 +121,8 @@ case "profile":
       ─────────────────────────────
       downstream of index  \(String(format: "%7.2f", whole - indexing)) ms
       throughput           \(String(format: "%7.2f", Double(bytes) / whole / 1000)) MB/s
+
+      wordCount            \(String(format: "%7.2f", counting)) ms  (\(script.wordCount) words)
     """)
 
 case "migrate":

@@ -197,8 +197,10 @@ vendored copy. Read the live file directly and your assertion becomes a claim
 about whatever the user last typed. `vendoredSnapshotIsIntact` pins the snapshot
 itself so it cannot drift silently.
 
-Measured facts worth knowing: `anal-informant.fountain` is 3,581 lines with 95
-`#N#`-numbered scenes and 40 sections; `THICK` forces essentially every line
+Measured facts worth knowing: the **vendored snapshot** of
+`anal-informant.fountain` is 3,581 lines with 95 `#N#`-numbered scenes and 40
+sections — the live file has moved on since and will keep moving, so measure
+against the snapshot or say which you mean; `THICK` forces essentially every line
 (597 `!`, 402 `@`, 37 `.`) and lints completely clean; 39 `.highland` bundles
 carry `text.fountain` and 19 carry the older `text.md`; the zips hold 344 stored
 + 308 deflated entries.

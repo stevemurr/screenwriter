@@ -188,10 +188,15 @@ final class TypingCostTests: XCTestCase {
 
     /// The status bar's word count must not be recomputed at typing rate.
     ///
-    /// `ParsedScript.wordCount` splits every printable element's text on each
-    /// read, walking grapheme clusters: 14.0ms on the 91 KB script in release.
-    /// `StatusBar.body` reads it, and that body re-runs on every keystroke
-    /// because the caret readout beside it changes.
+    /// `ParsedScript.wordCount` walks the whole script on each read — 20.3ms
+    /// when this test was written, 0.23ms now that it scans UTF-8 over native
+    /// strings. `StatusBar.body` reads it, and that body re-runs on every
+    /// keystroke because the caret readout beside it changes.
+    ///
+    /// The budget below is deliberately far above what 200 reads of a stored
+    /// `Int` can cost. It is a wiring test, not a benchmark: it fails if
+    /// something reconnects the property to the computed one, and it should not
+    /// fail because a laptop was busy.
     func testWordCountIsNotRecomputedOnEveryRead() throws {
         let model = ScreenplayModel()
         model.load(TypingWorkload.script)
@@ -205,7 +210,9 @@ final class TypingCostTests: XCTestCase {
         XCTAssertLessThan(
             elapsed, 5.0,
             "200 reads of model.wordCount cost \(String(format: "%.2f", elapsed))ms. It is stored "
-                + "for a reason: computing it from the script costs 14ms a read."
+                + "so that a value which cannot change between reparses is not recounted per "
+                + "keystroke: computing it from the script costs 0.23ms a read, and this body "
+                + "runs whenever the caret moves."
         )
     }
 

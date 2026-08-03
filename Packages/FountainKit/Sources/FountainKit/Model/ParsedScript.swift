@@ -123,15 +123,45 @@ public struct ParsedScript: Sendable {
     /// Word count over printable text only — action, dialogue, and headings.
     /// Notes, synopses, sections, and boneyard are excluded, matching what the
     /// status bar in the mockups is counting.
+    /// Counted over UTF-8 bytes rather than `Character`s.
+    ///
+    /// `split` breaks grapheme clusters over every printable line in the
+    /// document — Rule 4's mistake one level down. On the 91 KB script, release,
+    /// best of 20 on `CLOCK_THREAD_CPUTIME_ID`: **2.30ms splitting, 0.23ms
+    /// scanning bytes**, for the identical count of 14,317.
+    ///
+    /// The same splitting code measured **20.33ms** before `LineIndex` stopped
+    /// handing out bridged `NSString`s, which is worth recording because it is
+    /// the more interesting number: nothing about this function changed to make
+    /// it 9x faster. Every `element.text` was a `__NSCFString`, so walking it by
+    /// `Character` paid an `objc_msgSend` per code unit — the parser fix repaid
+    /// most of this cost as a side effect, in every consumer of `element.text`
+    /// at once. Beware of profiles taken across that commit: a cost attributed
+    /// here was, six sevenths of it, the string representation.
+    ///
+    /// A word is a maximal run of bytes that are not space, tab or newline,
+    /// which is exactly what `split` counted: a UTF-8 continuation byte is
+    /// always ≥ 0x80 and so never a separator, and no multi-byte character can
+    /// contain one of these three bytes.
     public var wordCount: Int {
-        elements.reduce(into: 0) { total, element in
+        var total = 0
+        for element in elements {
             switch element.kind {
             case .action, .dialogue, .sceneHeading, .parenthetical, .transition,
                  .centered, .lyrics, .character:
-                total += element.text.split { $0 == " " || $0 == "\n" || $0 == "\t" }.count
+                var inWord = false
+                for byte in element.text.utf8 {
+                    if byte == 0x20 || byte == 0x0A || byte == 0x09 {
+                        inWord = false
+                    } else if !inWord {
+                        inWord = true
+                        total += 1
+                    }
+                }
             case .section, .synopsis, .note, .boneyard, .blank, .pageBreak:
                 break
             }
         }
+        return total
     }
 }

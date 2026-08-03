@@ -206,9 +206,27 @@ struct TextBundleWriteTests {
     }
 
     /// A zip can name both `bin` and `bin/9.txt`; a filesystem cannot hold both,
-    /// so one has to lose. Which one used to depend on dictionary order — the
-    /// same bundle could write two different trees on two runs. It is the folder
-    /// now, every time.
+    /// so one has to lose. It is the folder now, every time.
+    ///
+    /// The shape this replaced did something worse than pick arbitrarily. Its two
+    /// dictionary orders did two different things, and neither was writing a tree:
+    ///
+    /// - folder first, then the plain file: the terminal branch overwrote the
+    ///   directory wrapper with the file, and `9.txt` was gone from the save.
+    /// - plain file first, then the nested path: `children[head]?.fileWrappers`
+    ///   walked into a *regular-file* wrapper, and `-[NSFileWrapper fileWrappers]`
+    ///   is directory-only — it raises `NSInternalInconsistencyException`.
+    ///   Optional chaining does not protect against that, because the wrapper is
+    ///   not nil, it is the wrong kind. The process aborts.
+    ///
+    /// It is reachable rather than theoretical: `HighlandBundle` keys `extras`
+    /// straight off zip entry names, so a damaged archive naming both walks into
+    /// it, and it lands inside `NSDocument.fileWrapper(ofType:)` on the main
+    /// thread mid-save. No archive in the reference library does this today.
+    ///
+    /// Swift cannot catch an ObjC exception in-process, so the raise itself is
+    /// not asserted here. The order that *doesn't* raise is, because losing a
+    /// folder silently is the same defect with a quieter failure mode.
     @Test("A path that is both a file and a folder resolves to the folder")
     func fileAndFolderCollision() throws {
         let bundle = TextBundle(
@@ -221,6 +239,45 @@ struct TextBundleWriteTests {
             #expect(bin.isDirectory)
             #expect(bin.fileWrappers?["9.txt"]?.regularFileContents == Data([2]))
         }
+
+        // The old algorithm, verbatim, driven in the one order that returns
+        // instead of aborting. Reading `isDirectory` is safe on any wrapper;
+        // reading `fileWrappers` on the result below would kill the test process,
+        // which is the whole point.
+        func legacyInsert(
+            _ wrapper: FileWrapper,
+            named name: String,
+            path: [String],
+            into children: inout [String: FileWrapper]
+        ) {
+            guard let head = path.first else {
+                wrapper.preferredFilename = name
+                children[name] = wrapper
+                return
+            }
+            var nested = children[head]?.fileWrappers ?? [:]
+            legacyInsert(wrapper, named: name, path: Array(path.dropFirst()), into: &nested)
+            let directory = FileWrapper(directoryWithFileWrappers: nested)
+            directory.preferredFilename = head
+            children[head] = directory
+        }
+
+        var legacy: [String: FileWrapper] = [:]
+        legacyInsert(FileWrapper(regularFileWithContents: Data([2])),
+                     named: "9.txt", path: ["bin"], into: &legacy)
+        #expect(legacy["bin"]?.isDirectory == true, "Precondition: `bin` starts as a folder.")
+        legacyInsert(FileWrapper(regularFileWithContents: Data([1])),
+                     named: "bin", path: [], into: &legacy)
+
+        let stranded = try #require(legacy["bin"])
+        #expect(
+            !stranded.isDirectory,
+            """
+            The shape this replaced no longer strands a regular-file wrapper where a \
+            folder belongs. Either the reproduction above has drifted from what \
+            shipped, or this test's premise is stale — check before deleting it.
+            """
+        )
     }
 
     /// The corpus's own bundles, written out and read back. The synthetic cases
