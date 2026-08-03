@@ -40,6 +40,93 @@ public final class ScreenplayModel {
     public var mode: EditorMode = .plainText
     public var showsPreview = true
     public var showsOutline = true
+    public var showsInspector = false
+
+    // MARK: - Production metadata
+
+    /// Sidecar data: status, shooting days, cast, locations, production notes.
+    /// Fountain has nowhere to record any of it.
+    public private(set) var metadata = ScreenplayMetadata()
+    /// How the stored records map onto the scenes of the current parse.
+    /// Recomputed with every parse, because scenes move.
+    public private(set) var resolution: MetadataResolution?
+    /// Set when metadata changes; cleared once written beside the document.
+    public private(set) var metadataNeedsSaving = false
+
+    /// The record for a scene, if one has been resolved onto it.
+    public func sceneMetadata(forSceneAt index: Int) -> SceneMetadata? {
+        guard let match = resolution?.match(forSceneAt: index) else { return nil }
+        return metadata.scenes.first { $0.id == match.recordID }
+    }
+
+    /// How confidently a scene's record was matched — an inexact match is worth
+    /// showing differently rather than presenting as fact.
+    public func matchTier(forSceneAt index: Int) -> MatchTier? {
+        resolution?.match(forSceneAt: index)?.tier
+    }
+
+    /// Edits a scene's record, creating one anchored to the current scene if
+    /// this is the first thing recorded about it.
+    public func updateSceneMetadata(
+        forSceneAt index: Int,
+        _ mutate: (inout SceneMetadata) -> Void
+    ) {
+        guard let scene = script.scenes.first(where: { $0.index == index }) else { return }
+
+        if let existing = sceneMetadata(forSceneAt: index),
+           let position = metadata.scenes.firstIndex(where: { $0.id == existing.id }) {
+            mutate(&metadata.scenes[position])
+            // Re-anchor to where the scene is now, so the next resolution starts
+            // from the truth rather than from where it used to be.
+            metadata.scenes[position].anchor = anchor(for: scene)
+        } else {
+            var record = SceneMetadata(anchor: anchor(for: scene))
+            mutate(&record)
+            metadata.scenes.append(record)
+        }
+        metadataNeedsSaving = true
+        resolve()
+    }
+
+    private func anchor(for scene: ScriptScene) -> SceneAnchor {
+        SceneIdentity.anchors(for: script)
+            .first { $0.orderIndex == scene.index - 1 }
+            ?? SceneAnchor(
+                sceneNumber: scene.number,
+                heading: scene.heading,
+                orderIndex: scene.index - 1
+            )
+    }
+
+    private func resolve() {
+        resolution = SceneIdentityResolver.resolve(metadata, against: script)
+    }
+
+    public func loadMetadata(for documentURL: URL?) {
+        guard let documentURL else {
+            metadata = ScreenplayMetadata()
+            resolve()
+            return
+        }
+        do {
+            metadata = try MetadataStore.load(for: documentURL)
+        } catch {
+            // A damaged sidecar must not block opening the screenplay. The store
+            // preserves the bad file rather than overwriting it.
+            Log.document.error("Metadata sidecar unreadable: \(String(describing: error))")
+            metadata = ScreenplayMetadata()
+        }
+        metadataNeedsSaving = false
+        resolve()
+    }
+
+    public func saveMetadata(for documentURL: URL) throws {
+        // Nothing recorded and nothing to clean up: do not litter the folder
+        // with an empty sidecar beside every script.
+        guard !metadata.scenes.isEmpty || metadataNeedsSaving else { return }
+        try MetadataStore.save(metadata, for: documentURL)
+        metadataNeedsSaving = false
+    }
 
     /// The payload filename to write back under, so a bundle that arrived as
     /// `text.md` is not silently renamed.
@@ -88,6 +175,7 @@ public final class ScreenplayModel {
         guard text == source else { return }
         script = parsed
         diagnostics = Linter.lint(parsed)
+        resolve()
         revision &+= 1
     }
 

@@ -33,6 +33,12 @@ struct RootView: View {
                     ContinuousPreview(script: model.script)
                         .frame(minWidth: 320)
                 }
+
+                if model.showsInspector {
+                    Divider()
+                    SceneInspector(model: model, sceneIndex: selectedSceneIndex)
+                        .frame(width: 300)
+                }
             }
             Divider()
             StatusBar(model: model, session: session)
@@ -54,6 +60,17 @@ struct RootView: View {
             guard let offset = target?.sourceOffset(in: model.script) else { return }
             session.jump(to: offset)
         }
+    }
+
+    /// The scene the inspector describes: whatever is selected in the sidebar,
+    /// falling back to whichever scene the caret sits in.
+    private var selectedSceneIndex: Int? {
+        if case .scene(let index) = selection { return index }
+        return model.script.scene(at: caretOffset)?.index
+    }
+
+    private var caretOffset: Int {
+        session.state.selectedRanges.first?.location ?? 0
     }
 
     private var editorPane: some View {
@@ -105,6 +122,13 @@ struct RootView: View {
             }
             .help("Show or hide the page preview")
             .accessibilityIdentifier("toggle.preview")
+        }
+        ToolbarItem {
+            Toggle(isOn: $model.showsInspector) {
+                Label("Inspector", systemImage: "sidebar.right")
+            }
+            .help("Show or hide the scene inspector")
+            .accessibilityIdentifier("toggle.inspector")
         }
         ToolbarItem {
             Button {

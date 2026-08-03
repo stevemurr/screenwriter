@@ -3,10 +3,15 @@ import FountainKit
 
 /// Content read from disk, before it reaches the main actor.
 private struct LoadedScreenplay: Sendable {
+    /// Where this came from. The metadata sidecar sits beside it, and `fileURL`
+    /// is not reliably set yet at the point `read(from:ofType:)` runs.
+    var url: URL
     var text: String
     var textFileName: String
     var infoData: Data?
     var extras: [String: Data]
+    /// True for an imported `.highland`: the source must never be written back.
+    var isReadOnlyOriginal = false
 }
 
 /// Hand-off between `read(from:ofType:)`, which AppKit may call on a background
@@ -64,6 +69,7 @@ final class ScreenplayDocument: NSDocument {
         case .package:
             let bundle = try TextBundle(directory: FileWrapper(url: url))
             return LoadedScreenplay(
+                url: url,
                 text: bundle.text,
                 textFileName: bundle.textFileName,
                 infoData: bundle.infoData,
@@ -71,13 +77,23 @@ final class ScreenplayDocument: NSDocument {
             )
 
         case .highland:
-            // Read-only by design, and not wired up until M2. Failing loudly
-            // beats a half-open document that cannot be saved anywhere sensible.
-            throw ScreenplayDocumentError.highlandImportNotAvailable
+            // Rule 6: the only call ever made against a `.highland` is a read.
+            // The document opens as a draft, so Save becomes Save As and there
+            // is no path from here back onto the original file.
+            let result = try HighlandBundle(contentsOf: url).imported(keepingOpaqueState: false)
+            return LoadedScreenplay(
+                url: url,
+                text: result.bundle.text,
+                textFileName: result.bundle.textFileName,
+                infoData: result.bundle.infoData,
+                extras: result.bundle.extras,
+                isReadOnlyOriginal: true
+            )
 
         case .fountain, .none:
             let data = try Data(contentsOf: url)
             return LoadedScreenplay(
+                url: url,
                 text: TextBundle.decode(data),
                 textFileName: url.lastPathComponent,
                 infoData: nil,
@@ -92,7 +108,44 @@ final class ScreenplayDocument: NSDocument {
         model.textFileName = loaded.textFileName
         model.bundleInfoData = loaded.infoData
         model.bundleExtras = loaded.extras
+        model.loadMetadata(for: fileURL ?? loaded.url)
+        if loaded.isReadOnlyOriginal {
+            // A draft has no file to save back to, so Cmd-S opens Save As and
+            // the imported bundle stays exactly as it was found.
+            isDraft = true
+            fileURL = nil
+            fileType = DocumentType.package.rawValue
+            displayName = loaded.url.deletingPathExtension().lastPathComponent
+        }
         undoManager?.removeAllActions()
+    }
+
+    /// Writes the metadata sidecar alongside the document.
+    ///
+    /// After `super`, so a failure to write production notes can never cost the
+    /// user the screenplay itself. Save-As carries the sidecar to the new
+    /// location; the old one is left where it is rather than deleted.
+    nonisolated override func write(
+        to url: URL,
+        ofType typeName: String,
+        for saveOperation: NSDocument.SaveOperationType,
+        originalContentsURL: URL?
+    ) throws {
+        try super.write(
+            to: url,
+            ofType: typeName,
+            for: saveOperation,
+            originalContentsURL: originalContentsURL
+        )
+        // Writing is synchronous on the main thread — `canAsynchronouslyWrite`
+        // returns false — so reading the model here is safe.
+        MainActor.assumeIsolated {
+            do {
+                try model.saveMetadata(for: url)
+            } catch {
+                Log.document.error("Could not write metadata sidecar: \(String(describing: error))")
+            }
+        }
     }
 
     override func revert(toContentsOf url: URL, ofType typeName: String) throws {
