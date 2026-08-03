@@ -40,10 +40,10 @@ import Foundation
 /// noise.
 ///
 /// Measured facts about the cost, so the next person does not have to find them
-/// again. All CPU time, `-c release`, on the 91 KB / 3 607-line
+/// again. All CPU time, `-c release`, on the vendored 91 KB / 3 581-line
 /// `anal-informant.fountain`:
 ///
-/// - **5.8ms**, against a 120ms debounce, off the main actor. There is no
+/// - **5.5ms**, against a 120ms debounce, off the main actor. There is no
 ///   frame budget here to blow; anything below is invisible in the app and
 ///   worth having only if it is also free.
 /// - **Nothing measures text.** This file and everything it calls import
@@ -53,14 +53,19 @@ import Foundation
 ///   cuts every line out of the document with `NSString.substring(with:)`, so
 ///   `Element.text` is a `__NSCFString` and each `.utf8` byte read is an
 ///   `objc_msgSend` into `-characterAtIndex:`. Handed the same script with the
-///   same element text natively stored, this paginates in **3.2ms instead of
-///   6.1ms for identical output**. The lever is in `Parse/`, not here: pulling
+///   same element text natively stored, this paginates in **3.1ms instead of
+///   5.4ms for identical output**. The lever is in `Parse/`, not here: pulling
 ///   the bytes over on this side costs an allocation per element and gives back
 ///   only 0.2ms of it.
 /// - **The tallest block in the whole library is 25 source lines**, across all
 ///   76 scripts and 28 177 blocks. No real script has ever handed the splitter
-///   a block that fills a page by itself, so `split`'s cost is invisible on
-///   real work and the only thing guarding it is `PaginateScalingTests`.
+///   a block that fills a page by itself, so the whole repeated-split path —
+///   the carried `(CONT'D)`, the second and later `(MORE)`, the fill-and-carry
+///   fallback below — is **unreachable from the corpus**. A page-break bug that
+///   duplicates a character of the script from the second break of a block
+///   onward passes all 184 other tests in this suite, the 508-page Highland
+///   fidelity check included; `PaginateTallBlockTests` is the one that catches
+///   it, and `PaginateScalingTests` guards the shape of the curve.
 public enum Paginator {
 
     // MARK: - Entry points
@@ -733,7 +738,7 @@ public enum Paginator {
         /// Only `.right` and `.centered` lines need it — a left-aligned line
         /// starts at its column's left edge whatever it says — and they are
         /// about one printed line in a hundred. Computing it for every line
-        /// instead cost 0.35ms of the 6.2ms release pagination of the 91 KB
+        /// instead cost 0.45ms of the 6.0ms release pagination of the 91 KB
         /// script, because `unicodeScalars.count` walks the whole string.
         private func width(of text: String) -> CGFloat {
             CGFloat(text.unicodeScalars.count) * layout.characterWidth
