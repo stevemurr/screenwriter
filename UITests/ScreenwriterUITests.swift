@@ -62,6 +62,30 @@ final class ScreenwriterUITests: XCTestCase {
 
     """
 
+    /// Attaches the accessibility tree so a failing lookup can be diagnosed from
+    /// the result bundle instead of by another three-minute guess.
+    func testDumpAccessibilityTree() {
+        let editor = newDocument()
+        editor.typeText(sample)
+        // Give the debounced reparse time to reach the status bar.
+        _ = app.staticTexts["INT. GLASS HOUSE - NIGHT"].waitForExistence(timeout: 10)
+
+        let tree = XCTAttachment(string: app.debugDescription)
+        tree.name = "accessibility-tree"
+        tree.lifetime = .keepAlways
+        add(tree)
+
+        let labels = app.staticTexts.allElementsBoundByIndex
+            .map { "[\($0.identifier)] \($0.label)" }
+            .joined(separator: "\n")
+        let dump = XCTAttachment(string: labels)
+        dump.name = "static-texts"
+        dump.lifetime = .keepAlways
+        add(dump)
+
+        XCTAssertEqual(app.windows.count, 1, "A UI-test launch should open exactly one window.")
+    }
+
     func testNewDocumentOpensAnEditor() {
         _ = newDocument()
     }
