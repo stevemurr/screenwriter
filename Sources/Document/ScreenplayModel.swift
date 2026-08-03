@@ -183,6 +183,7 @@ public final class ScreenplayModel {
         var script: ParsedScript
         var diagnostics: [Diagnostic]
         var paginated: PaginatedScript
+        var wordCount: Int
     }
 
     /// Nonisolated so it can run on a detached task: this is the expensive work,
@@ -192,16 +193,25 @@ public final class ScreenplayModel {
         return Analysis(
             script: script,
             diagnostics: Linter.lint(script),
-            paginated: Paginator.paginate(script, settings: settings)
+            paginated: Paginator.paginate(script, settings: settings),
+            // Counted here rather than read from `script` on demand. See
+            // `wordCount` below.
+            wordCount: script.wordCount
         )
     }
 
     private func apply(_ analysis: Analysis, for source: String) {
         // Discard a result the document has already moved past.
+        //
+        // This only works because the editor hands over a *snapshot*: while the
+        // surface was emitting `textView.string` directly, both sides of this
+        // comparison aliased the same live storage and it could never fail. See
+        // `EditorText.snapshot(of:)`.
         guard text == source else { return }
         script = analysis.script
         diagnostics = analysis.diagnostics
         paginated = analysis.paginated
+        wordCount = analysis.wordCount
         resolve()
         revision &+= 1
     }
@@ -243,7 +253,21 @@ public final class ScreenplayModel {
 
     public var sceneCount: Int { script.scenes.count }
     public var characterCount: Int { script.characters.count }
-    public var wordCount: Int { script.wordCount }
+
+    /// Stored, not `script.wordCount`.
+    ///
+    /// `ParsedScript.wordCount` is computed: it splits every printable
+    /// element's text on each read, walking grapheme clusters as it goes. That
+    /// measured **14.0ms** on the largest script in the reference library, in a
+    /// release build. The status bar reads it from `StatusBar.body`, and that
+    /// body re-runs on every keystroke because the caret readout beside it
+    /// changes — so a value that can only change once per debounced reparse was
+    /// being recomputed at typing rate, on the main actor.
+    ///
+    /// Counting it in `analyse` puts it on the detached task with the parse,
+    /// the lint and the pagination, which is where the rest of the derived data
+    /// is already computed.
+    public private(set) var wordCount: Int = 0
 }
 
 extension ScreenplayModel {
