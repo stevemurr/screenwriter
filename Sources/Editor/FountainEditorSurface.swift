@@ -128,7 +128,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
                 replacementToken: replacementToken,
                 resetUndo: true
             )
-        } else if host.textView.string != text, !context.coordinator.isEmittingUserEdit {
+        } else if !context.coordinator.textViewHolds(text), !context.coordinator.isEmittingUserEdit {
             // A binding change with no replacement token is still applied
             // byte-exactly, but it must not be mistaken for a user edit.
             context.coordinator.applyExternalText(
@@ -197,14 +197,36 @@ public struct FountainEditorSurface: NSViewRepresentable {
         /// the binding kept the pre-undo value, the next `updateNSView` saw a
         /// mismatch, and helpfully restored what the user had just undone. Undo
         /// appeared to do nothing.
+        ///
+        /// ## The text has to leave here as a snapshot
+        /// `textView.string` is a lazily bridged `NSString`, not a value — see
+        /// `EditorText.snapshot(of:)`, which is also why this got *faster*.
+        /// Comparing or storing a bridged string re-transcodes the whole
+        /// document, and a keystroke paid that twice: once for the guard here
+        /// and once in `ScreenplayModel.text`'s `didSet`. That was 7.9ms of the
+        /// 12.8ms a keystroke cost. Snapshotting once costs 0.17ms and leaves
+        /// every later comparison a native memcmp.
         func emitTextIfChanged() {
             guard let textView = host?.textView else { return }
-            let source = textView.string
+            let source = EditorText.snapshot(of: textView.string as NSString)
             guard source != parent.text else { return }
             host?.rulerView.invalidateLineIndex()
             isEmittingUserEdit = true
             parent.text = source
             isEmittingUserEdit = false
+        }
+
+        /// Whether the text view still holds exactly this source.
+        ///
+        /// `NSString.isEqual` rather than Swift's `==`. Since `emitTextIfChanged`
+        /// snapshots, the two sides now have different representations — native
+        /// Swift storage against the text view's bridged `NSString` — and Swift's
+        /// `==` has to transcode the whole document to compare them. That is
+        /// 4ms on the 91 KB script, and this runs on every scroll notification
+        /// and every SwiftUI update. `isEqual` compares in C, lengths first.
+        func textViewHolds(_ source: String) -> Bool {
+            guard let host else { return false }
+            return (host.textView.string as NSString).isEqual(source as NSString)
         }
 
         func observeViewport(for host: EditorHostView) {
@@ -264,7 +286,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
             )
             let priorAnchor = parent.session.state.scrollAnchor
 
-            if textView.string != source {
+            if !textViewHolds(source) {
                 textView.string = source
                 applyBaseAttributes()
             }
@@ -370,7 +392,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
         private func applyRuns(_ runs: [ElementStyler.Run], key: StyleKey) {
             guard key == styleKey,
                   let host,
-                  host.textView.string == key.source
+                  textViewHolds(key.source)
             else { return }
 
             // Held so scrolling can extend styling into newly revealed text
@@ -386,8 +408,8 @@ public struct FountainEditorSurface: NSViewRepresentable {
         /// scrolling costs nothing; only crossing the margin does any work.
         func restyleForViewportIfNeeded() {
             guard let host, let runs = styledRuns, let key = styleKey,
-                  host.textView.string == key.source,
-                  host.needsRestyleForViewport()
+                  host.needsRestyleForViewport(),
+                  textViewHolds(key.source)
             else { return }
             let styler = ElementStyler(mode: key.mode, fontSize: key.fontSize)
             host.applyStyle(base: styler.baseAttributes(), runs: runs)
@@ -395,6 +417,11 @@ public struct FountainEditorSurface: NSViewRepresentable {
 
         // MARK: - Viewport and caret
 
+        /// Runs twice per keystroke — once for the text change and once for the
+        /// selection change AppKit posts alongside it — and again on every
+        /// arrow key, so everything it does is paid at typing rate. See
+        /// `EditorText.lineAndColumn` for why the caret readout no longer
+        /// indexes the whole document to find two integers.
         private func captureState() {
             guard let textView = host?.textView else { return }
             let ranges = textView.selectedRanges.map(\.rangeValue)
@@ -402,10 +429,12 @@ public struct FountainEditorSurface: NSViewRepresentable {
             parent.session.state.scrollAnchor = currentScrollAnchor()
             parent.session.state.ownsFocus = textView.window?.firstResponder === textView
             if let caret = ranges.first?.location {
-                let index = LineIndex(source: textView.string)
-                let line = index.lineNumber(containing: caret)
-                parent.session.state.caretLine = line + 1
-                parent.session.state.caretColumn = caret - index.lineStarts[line] + 1
+                let position = EditorText.lineAndColumn(
+                    in: textView.string as NSString,
+                    at: caret
+                )
+                parent.session.state.caretLine = position.line
+                parent.session.state.caretColumn = position.column
             }
         }
 
