@@ -158,7 +158,6 @@ final class WorkspaceRenderCostTests: XCTestCase {
             PagePreview(
                 paginated: model.paginated,
                 caretPage: caretPage,
-                showsPages: $model.previewShowsPages
             )
         }
     }
@@ -402,7 +401,7 @@ final class WorkspaceRenderCostTests: XCTestCase {
         model.load(source)
         let paginated = try XCTUnwrap(model.paginated)
         let page = try XCTUnwrap(paginated.pages.first { !$0.isTitlePage })
-        let canvas = PageCanvas(page: page, layout: .letter, separated: true, scale: 0.5)
+        let canvas = PageCanvas(page: page, layout: .letter, scale: 0.5)
         let printed = page.lines.filter { !$0.isBlank }
         XCTAssertGreaterThan(printed.count, 20, "A full page should have been picked.")
 

@@ -1,22 +1,6 @@
 import AppKit
 import FountainKit
 
-/// How the source pane renders. Both modes are editable and share one caret —
-/// only the attributes applied to the same backing text differ.
-public enum EditorMode: String, CaseIterable, Sendable {
-    /// Monospace source with a line-number gutter and syntax colouring.
-    case plainText
-    /// Screenplay indents, Courier Prime, dimmed forcing marks. No gutter.
-    case styled
-
-    public var title: String {
-        switch self {
-        case .plainText: return "Plain Text"
-        case .styled: return "Styled"
-        }
-    }
-}
-
 /// Turns a `ParsedScript` into text attributes.
 ///
 /// Pure and synchronous: it takes a parse result and returns ranges plus
@@ -36,16 +20,34 @@ public struct ElementStyler: Sendable {
     public struct Run: @unchecked Sendable {
         public let range: NSRange
         public let attributes: [NSAttributedString.Key: Any]
+        /// Changes exactly when `attributes` would, and never merely because the
+        /// run moved or its text grew.
+        ///
+        /// This is what lets `EditorHostView.applyStyle` tell "the writer typed a
+        /// character into a line of dialogue" — every run styled identically,
+        /// nothing to write — from "that line just became a character cue".
+        /// Comparing the attribute dictionaries themselves is not an option:
+        /// `[NSAttributedString.Key: Any]` is not `Equatable`, and the values are
+        /// freshly-allocated `NSParagraphStyle`s that would compare by identity.
+        ///
+        /// `Hasher` is seeded per process, which is fine and deliberate: a
+        /// signature is only ever compared against another one computed in the
+        /// same process, moments earlier.
+        public let signature: Int
+
+        init(range: NSRange, attributes: [NSAttributedString.Key: Any], signature: Int) {
+            self.range = range
+            self.attributes = attributes
+            self.signature = signature
+        }
     }
 
-    public let mode: EditorMode
     public let layout: PageLayout
     /// Type size for the editing surface. Scales the styled columns with it, so
     /// the page keeps its proportions at any size.
     public let fontSize: CGFloat
 
-    public init(mode: EditorMode, layout: PageLayout = .letter, fontSize: CGFloat = 12) {
-        self.mode = mode
+    public init(layout: PageLayout = .letter, fontSize: CGFloat = 12) {
         self.layout = layout
         self.fontSize = fontSize
     }
@@ -55,20 +57,11 @@ public struct ElementStyler: Sendable {
 
     /// Base attributes for the whole document, applied before per-element runs.
     public func baseAttributes() -> [NSAttributedString.Key: Any] {
-        switch mode {
-        case .plainText:
-            return [
-                .font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular),
-                .foregroundColor: Style.Element.body,
-                .paragraphStyle: NSParagraphStyle.default
-            ]
-        case .styled:
-            return [
-                .font: ScreenplayFont.regular(size: fontSize),
-                .foregroundColor: Style.Element.body,
-                .paragraphStyle: paragraphStyle(for: .action)
-            ]
-        }
+        [
+            .font: ScreenplayFont.regular(size: fontSize),
+            .foregroundColor: Style.Element.body,
+            .paragraphStyle: paragraphStyle(for: .action)
+        ]
     }
 
     /// Underlines what the linter flagged, without changing anything else about
@@ -78,6 +71,12 @@ public struct ElementStyler: Sendable {
             guard diagnostic.range.length > 0,
                   NSMaxRange(diagnostic.range) <= length
             else { return nil }
+            var hasher = Hasher()
+            hasher.combine("diagnostic")
+            hasher.combine(diagnostic.severity)
+            // Length, unlike an element's, is part of what an underline *is*:
+            // it is the extent of the thing being flagged.
+            hasher.combine(diagnostic.range.length)
             return Run(
                 range: diagnostic.range,
                 attributes: [
@@ -86,28 +85,42 @@ public struct ElementStyler: Sendable {
                     .underlineColor: diagnostic.severity == .warning
                         ? NSColor.systemOrange
                         : NSColor.tertiaryLabelColor
-                ]
+                ],
+                signature: hasher.finalize()
             )
         }
     }
 
     public func runs(for script: ParsedScript) -> [Run] {
-        var runs: [Run] = []
-        runs.reserveCapacity(script.elements.count * 2)
+        runs(for: script.elements)
+    }
 
-        for element in script.elements {
+    /// The element overload, so a window classified by `LiveClassifier` styles
+    /// through exactly the same code as a full parse.
+    public func runs(for elements: [Element]) -> [Run] {
+        var runs: [Run] = []
+        runs.reserveCapacity(elements.count * 2)
+
+        for element in elements {
             guard element.range.length > 0 else { continue }
 
             var attributes: [NSAttributedString.Key: Any] = [
                 .foregroundColor: color(for: element.kind)
             ]
-            if mode == .styled {
-                attributes[.paragraphStyle] = paragraphStyle(for: element.kind)
-                if let font = font(for: element.kind) { attributes[.font] = font }
-            } else if let font = plainFont(for: element.kind) {
-                attributes[.font] = font
-            }
-            runs.append(Run(range: element.range, attributes: attributes))
+            attributes[.paragraphStyle] = paragraphStyle(for: element.kind)
+            if let font = font(for: element.kind) { attributes[.font] = font }
+            // Deliberately *not* the range: an element whose text grew by one
+            // character is styled identically, and that is the whole common case
+            // of typing.
+            var hasher = Hasher()
+            hasher.combine(element.kind)
+            runs.append(
+                Run(
+                    range: element.range,
+                    attributes: attributes,
+                    signature: hasher.finalize()
+                )
+            )
 
             // Dim the forcing mark in place. It stays selectable and copyable —
             // it is still really there — but stops competing with the prose.
@@ -115,8 +128,17 @@ public struct ElementStyler: Sendable {
                 let length = mark == "#" ? max(element.depth, 1) : 1
                 let markRange = NSRange(location: element.range.location, length: length)
                 if NSMaxRange(markRange) <= NSMaxRange(element.range) {
+                    var markHasher = Hasher()
+                    markHasher.combine("mark")
+                    // `#` to `##` moves the boundary without changing any kind,
+                    // so the mark run's length is part of its identity.
+                    markHasher.combine(length)
                     runs.append(
-                        Run(range: markRange, attributes: [.foregroundColor: Style.Element.forcingMark])
+                        Run(
+                            range: markRange,
+                            attributes: [.foregroundColor: Style.Element.forcingMark],
+                            signature: markHasher.finalize()
+                        )
                     )
                 }
             }
@@ -138,15 +160,6 @@ public struct ElementStyler: Sendable {
         case .lyrics: return Style.Element.lyrics
         case .pageBreak: return Style.Element.forcingMark
         case .action, .dialogue, .parenthetical, .blank: return Style.Element.body
-        }
-    }
-
-    private func plainFont(for kind: ElementKind) -> NSFont? {
-        switch kind {
-        case .sceneHeading, .section:
-            return .monospacedSystemFont(ofSize: fontSize, weight: .semibold)
-        default:
-            return nil
         }
     }
 

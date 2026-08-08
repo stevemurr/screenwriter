@@ -4,7 +4,7 @@ import Observation
 import SwiftUI
 
 /// Where the viewport was, expressed as a character offset so it survives a
-/// relayout caused by switching modes or toggling the gutter.
+/// relayout caused by a change of type size.
 public struct EditorScrollAnchor: Sendable, Hashable {
     public var characterOffset: Int = 0
     public var horizontalOffset: CGFloat = 0
@@ -24,6 +24,19 @@ public struct EditorJump: Sendable, Hashable {
     public var offset: Int
 }
 
+/// A request from outside the editor to *change* the text — auto-fixes, for now.
+///
+/// Routed through the text view rather than the model's `text` for two reasons
+/// that are both about not being noticed: `NSTextView` registers the change with
+/// the undo manager, so one ⌘Z takes the fix back; and it adjusts the selection
+/// for the edit, so a fix applied above the caret does not shift the caret out
+/// from under the writer. Assigning `model.text` does neither.
+public struct EditorEditRequest: Sendable, Hashable {
+    public var token: UInt64
+    /// Back-to-front, as `AutoFix.edits` returns them.
+    public var edits: [AutoFix.Edit]
+}
+
 public struct EditorSurfaceState: Sendable {
     public var selectedRanges: [NSRange] = [NSRange(location: 0, length: 0)]
     public var scrollAnchor = EditorScrollAnchor()
@@ -32,6 +45,7 @@ public struct EditorSurfaceState: Sendable {
     public var caretLine = 1
     public var caretColumn = 1
     public var pendingJump: EditorJump?
+    public var pendingEdits: EditorEditRequest?
     public init() {}
 }
 
@@ -49,13 +63,20 @@ public final class FountainEditorSession {
         jumpCounter &+= 1
         state.pendingJump = EditorJump(token: jumpCounter, offset: offset)
     }
+
+    /// Asks the surface to apply text edits through the text view.
+    public func apply(_ edits: [AutoFix.Edit]) {
+        guard !edits.isEmpty else { return }
+        jumpCounter &+= 1
+        state.pendingEdits = EditorEditRequest(token: jumpCounter, edits: edits)
+    }
 }
 
 /// The Fountain source pane.
 ///
 /// Adapted from `topside/Sources/WorkPane/Editor/TextKitEditorSurface.swift`,
 /// which solved the hard parts already: TextKit 2 without falling back to
-/// TextKit 1, a viewport-bounded line-number ruler, scroll-anchor preservation,
+/// TextKit 1, scroll-anchor preservation,
 /// undo that actually round-trips through a SwiftUI binding, and the guarded
 /// path for applying computed attributes without disturbing the caret. The
 /// Fountain-specific part is only which attributes get applied.
@@ -70,7 +91,6 @@ public struct FountainEditorSurface: NSViewRepresentable {
     @Binding var text: String
     let script: ParsedScript
     let diagnostics: [Diagnostic]
-    let mode: EditorMode
     /// Editor-only type size; the page geometry is untouched by it.
     let fontSize: CGFloat
     /// Bumped by the owner when `script` reflects new content, so the styler
@@ -85,7 +105,6 @@ public struct FountainEditorSurface: NSViewRepresentable {
         text: Binding<String>,
         script: ParsedScript,
         diagnostics: [Diagnostic],
-        mode: EditorMode,
         fontSize: CGFloat,
         revision: UInt64,
         replacementToken: UInt64,
@@ -94,7 +113,6 @@ public struct FountainEditorSurface: NSViewRepresentable {
         self._text = text
         self.script = script
         self.diagnostics = diagnostics
-        self.mode = mode
         self.fontSize = fontSize
         self.revision = revision
         self.replacementToken = replacementToken
@@ -110,9 +128,9 @@ public struct FountainEditorSurface: NSViewRepresentable {
         context.coordinator.observeUndo(for: host.textView)
         context.coordinator.observeViewport(for: host)
         context.coordinator.applyExternalText(text, replacementToken: replacementToken, resetUndo: true)
-        context.coordinator.applyMode(mode, fontSize: fontSize)
+        context.coordinator.applyTypeSize(fontSize)
         context.coordinator.scheduleStyling(
-            script: script, diagnostics: diagnostics, mode: mode,
+            script: script, diagnostics: diagnostics,
             fontSize: fontSize, revision: revision
         )
         return host
@@ -138,10 +156,11 @@ public struct FountainEditorSurface: NSViewRepresentable {
             )
         }
 
-        context.coordinator.applyMode(mode, fontSize: fontSize)
+        context.coordinator.applyTypeSize(fontSize)
+        context.coordinator.applyPendingEdits(session.state.pendingEdits)
         context.coordinator.applyPendingJump(session.state.pendingJump)
         context.coordinator.scheduleStyling(
-            script: script, diagnostics: diagnostics, mode: mode,
+            script: script, diagnostics: diagnostics,
             fontSize: fontSize, revision: revision
         )
     }
@@ -161,7 +180,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
         var isEmittingUserEdit = false
         var stylingTask: Task<Void, Never>?
         private var appliedJumpToken: UInt64?
-        private var appliedMode: EditorMode?
+        private var appliedEditToken: UInt64?
         private var appliedFontSize: CGFloat?
         private var styleKey: StyleKey?
         private var styledRuns: [ElementStyler.Run]?
@@ -170,7 +189,6 @@ public struct FountainEditorSurface: NSViewRepresentable {
 
         private struct StyleKey: Equatable {
             let revision: UInt64
-            let mode: EditorMode
             let fontSize: CGFloat
             let source: String
         }
@@ -210,7 +228,6 @@ public struct FountainEditorSurface: NSViewRepresentable {
             guard let textView = host?.textView else { return }
             let source = EditorText.snapshot(of: textView.string as NSString)
             guard source != parent.text else { return }
-            host?.rulerView.invalidateLineIndex()
             isEmittingUserEdit = true
             parent.text = source
             isEmittingUserEdit = false
@@ -273,12 +290,15 @@ public struct FountainEditorSurface: NSViewRepresentable {
             undoObservers.removeAll()
         }
 
-        // MARK: - Applying text and mode
+        // MARK: - Applying text and type size
 
         func applyExternalText(_ source: String, replacementToken: UInt64, resetUndo: Bool) {
             guard let host else { return }
             stylingTask?.cancel()
             styleKey = nil
+            // Nothing that was applied to the old text says anything about the
+            // new text, so the next pass must write the whole window.
+            host.invalidateAppliedStyle()
             let textView = host.textView
             let priorRanges = normalizedRanges(
                 parent.session.state.selectedRanges,
@@ -293,8 +313,41 @@ public struct FountainEditorSurface: NSViewRepresentable {
             textView.selectedRanges = priorRanges.map(NSValue.init(range:))
             if resetUndo { textView.undoManager?.removeAllActions() }
             appliedReplacementToken = replacementToken
-            host.rulerView.invalidateLineIndex()
             restoreScroll(anchor: priorAnchor)
+        }
+
+        /// Applies auto-fixes through the text view's own editing path.
+        ///
+        /// `shouldChangeText(inRanges:replacementStrings:)` is what registers the
+        /// whole set as **one** undoable action — so a writer who does not want a
+        /// fix presses ⌘Z once, not once per fix — and `didChangeText()` closes
+        /// it, which is also what runs the live styler over the changed lines.
+        func applyPendingEdits(_ request: EditorEditRequest?) {
+            guard let request, appliedEditToken != request.token, let host else { return }
+            appliedEditToken = request.token
+            guard !request.edits.isEmpty, let storage = host.textView.textStorage else { return }
+
+            let length = storage.length
+            // The edits were computed against a parse; the writer may have typed
+            // since. Anything that no longer fits the document is dropped rather
+            // than clamped, because a clamped range replaces the wrong text.
+            let valid = request.edits.filter { NSMaxRange($0.range) <= length }
+            guard valid.count == request.edits.count else { return }
+
+            let textView = host.textView
+            guard textView.shouldChangeText(
+                inRanges: valid.map { NSValue(range: $0.range) },
+                replacementStrings: valid.map(\.replacement)
+            ) else { return }
+
+            storage.beginEditing()
+            for edit in valid {
+                storage.replaceCharacters(in: edit.range, with: edit.replacement)
+            }
+            storage.endEditing()
+            textView.didChangeText()
+            captureState()
+            emitTextIfChanged()
         }
 
         /// Moves the caret in response to a sidebar selection, and centres the
@@ -326,22 +379,24 @@ public struct FountainEditorSurface: NSViewRepresentable {
             }
         }
 
-        /// Switching modes preserves the caret and the viewport, because the
-        /// document did not change — only its attributes and container geometry.
-        func applyMode(_ mode: EditorMode, fontSize: CGFloat) {
-            guard let host, appliedMode != mode || appliedFontSize != fontSize else { return }
+        /// Changing the type size preserves the caret and the viewport, because
+        /// the document did not change — only its attributes and the width of
+        /// the column they lay out in.
+        func applyTypeSize(_ fontSize: CGFloat) {
+            guard let host, appliedFontSize != fontSize else { return }
             let anchor = currentScrollAnchor()
             let ranges = host.textView.selectedRanges
-            appliedMode = mode
             appliedFontSize = fontSize
             styleKey = nil
-            host.setShowsLineNumbers(mode == .plainText)
+            // Every run's attributes change and no run's signature does, so the
+            // diff in `applyStyle` would correctly conclude there is nothing to
+            // do. Tell it otherwise.
+            host.invalidateAppliedStyle()
+            host.liveStyler.fontSize = fontSize
             // The script column is a measure in characters, so it grows with the
             // type just as the indents do.
             host.setScriptColumn(
-                mode == .styled
-                    ? Style.scriptColumnWidth * (fontSize / PageLayout.letter.fontSize)
-                    : nil
+                Style.scriptColumnWidth * (fontSize / PageLayout.letter.fontSize)
             )
             applyBaseAttributes()
             host.textView.selectedRanges = ranges
@@ -351,8 +406,8 @@ public struct FountainEditorSurface: NSViewRepresentable {
         private func applyBaseAttributes() {
             guard let host else { return }
             // Through the same scoped path: a full-document write here would
-            // reintroduce the scroll jump on every mode or size change.
-            let styler = ElementStyler(mode: parent.mode, fontSize: parent.fontSize)
+            // reintroduce the scroll jump on every type-size change.
+            let styler = ElementStyler(fontSize: parent.fontSize)
             host.applyStyle(base: styler.baseAttributes(), runs: styledRuns ?? [])
             host.textView.backgroundColor = Style.editorBackground
             host.textView.insertionPointColor = .textColor
@@ -363,23 +418,34 @@ public struct FountainEditorSurface: NSViewRepresentable {
         func scheduleStyling(
             script: ParsedScript,
             diagnostics: [Diagnostic],
-            mode: EditorMode,
             fontSize: CGFloat,
             revision: UInt64
         ) {
-            let key = StyleKey(
-                revision: revision, mode: mode, fontSize: fontSize, source: script.source
-            )
+            let key = StyleKey(revision: revision, fontSize: fontSize, source: script.source)
             guard key != styleKey else { return }
             styleKey = key
             stylingTask?.cancel()
+
+            // What the live styler is allowed to decide for itself, refreshed
+            // from each parse. Both are Rule-shaped: a boneyard spans blank
+            // lines so a local window cannot see it (and `LiveClassifier`
+            // explains why), and a title page is only a title page at the head
+            // of the document (Rule 7).
+            if let host {
+                host.liveStyler.allowsLiveStyling = !script.elements.contains { $0.kind == .boneyard }
+                host.liveStyler.titlePageEnd = script.titlePage.map { NSMaxRange($0.range) } ?? 0
+                // The completion list is only as good as the last parse, which
+                // is the right cadence: a name typed a second ago is already in
+                // the cast by the time you type it again.
+                host.vocabulary = ScriptVocabulary(script: script)
+            }
             guard !script.source.isEmpty else { return }
 
             // Styling runs off the main actor and is applied only if the text
             // view still holds the exact source it was computed from.
             stylingTask = Task { [weak self] in
                 let runs = await Task.detached(priority: .userInitiated) {
-                    let styler = ElementStyler(mode: mode, fontSize: fontSize)
+                    let styler = ElementStyler(fontSize: fontSize)
                     let length = (script.source as NSString).length
                     return styler.runs(for: script)
                         + styler.diagnosticRuns(diagnostics, length: length)
@@ -398,7 +464,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
             // Held so scrolling can extend styling into newly revealed text
             // without recomputing the whole document.
             styledRuns = runs
-            let styler = ElementStyler(mode: key.mode, fontSize: key.fontSize)
+            let styler = ElementStyler(fontSize: key.fontSize)
             host.applyStyle(base: styler.baseAttributes(), runs: runs)
         }
 
@@ -411,7 +477,7 @@ public struct FountainEditorSurface: NSViewRepresentable {
                   host.needsRestyleForViewport(),
                   textViewHolds(key.source)
             else { return }
-            let styler = ElementStyler(mode: key.mode, fontSize: key.fontSize)
+            let styler = ElementStyler(fontSize: key.fontSize)
             host.applyStyle(base: styler.baseAttributes(), runs: runs)
         }
 
@@ -453,9 +519,6 @@ public struct FountainEditorSurface: NSViewRepresentable {
             let character = fragment.map {
                 content.offset(from: content.documentRange.location, to: $0.rangeInElement.location)
             } ?? 0
-            // A visible origin left of the document is ruler geometry, not a
-            // scroll position: with the gutter shown, minX sits at minus its
-            // thickness.
             return EditorScrollAnchor(
                 characterOffset: character,
                 horizontalOffset: max(visible.minX, 0)
@@ -465,31 +528,11 @@ public struct FountainEditorSurface: NSViewRepresentable {
         /// Puts the anchored line back at the *top* of the viewport.
         ///
         /// Only for changes that genuinely alter the geometry — loading a
-        /// document, or switching mode, which turns the gutter on or off and
-        /// changes the column width. Restyling preserves the exact origin
-        /// instead; see `EditorHostView.applyStyle`.
-        ///
-        /// `scrollRangeToVisible` is deliberately not used: it scrolls the
-        /// minimum distance to bring the character *into view*, so an anchor
-        /// just off the top lands at the bottom edge and the page appears to
-        /// jump by a screen.
+        /// document, or changing the type size, which re-heights every fragment.
+        /// Restyling preserves the exact origin instead; see
+        /// `EditorHostView.applyStyle`.
         private func restoreScroll(anchor: EditorScrollAnchor) {
-            guard let host,
-                  let layout = host.textView.textLayoutManager,
-                  let content = layout.textContentManager
-            else { return }
-
-            let length = (host.textView.string as NSString).length
-            let offset = min(max(anchor.characterOffset, 0), length)
-            guard let location = content.location(content.documentRange.location, offsetBy: offset),
-                  let fragment = layout.textLayoutFragment(for: location)
-            else { return }
-
-            let y = fragment.layoutFragmentFrame.minY + host.textView.textContainerOrigin.y
-            host.scrollView.contentView.scroll(
-                to: NSPoint(x: max(anchor.horizontalOffset, 0), y: max(y, 0))
-            )
-            host.scrollView.reflectScrolledClipView(host.scrollView.contentView)
+            host?.restoreScroll(anchor: anchor)
         }
 
         private func normalizedRanges(_ ranges: [NSRange], utf16Length: Int) -> [NSRange] {

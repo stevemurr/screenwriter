@@ -163,6 +163,31 @@ trailing period, parentheticals on the cue line, and `.`/`>` used as generic
 force marks. The parser accepts all of it. Ambiguity is reported by the lint
 layer, separately and testably — never by refusing to parse.
 
+### Rule 14: Typed text is styled before it is drawn, never after
+Styling used to hang entirely off the debounced parse, so every character was
+laid out twice — once with inherited attributes, once ~150ms later with the right
+ones — and the second pass landed exactly when the writer stopped typing.
+`LiveStyler` classifies the edited block synchronously and styles it from
+`NSTextView.didChangeText()`, which is ahead of the display cycle. TextKit lays
+out lazily, so what matters is being ahead of the *draw*, not being inside the
+edit.
+
+**Do not move that write into `textStorage(_:willProcessEditing:…)`.** It is the
+obvious hook and it is wrong: writing attributes there re-enters `edited(…)`, and
+`NSTextStorage` coalesces it into the edit in flight, so the range AppKit is told
+about becomes the whole restyled block and `NSTextView` puts the caret at the end
+of it. Of twelve characters typed mid-line, one landed there and eleven at the
+end of the document. `testTypingAWordLeavesEveryCharacterWhereItWasTyped` pins
+it; one keystroke will not reproduce it.
+
+The debounced pass then diffs against what it last applied and usually writes
+nothing — `setAttributes` over the styled window invalidates every laid-out
+fragment in it, which was the *other* half of the visible jank. Runs carry a
+`signature` that changes when attributes would and not when a run merely moved,
+because an insertion shifts every following element without restyling any of it.
+`LiveClassifier` refuses the boneyard and the document head, and a refusal is
+reported so the debounced pass knows it still owns that text.
+
 ### Rule 15: A scene's range is not what a scene move should carry
 `ScriptScene.range` runs from a heading to the *next scene heading*, so a section
 heading between two scenes falls inside the one above it. Moving a scene by that

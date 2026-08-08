@@ -7,8 +7,8 @@ import SwiftUI
 /// The three mockups use three different segmented controls
 /// (`Write|Preview|Production`, `Beat Board|Script|Timeline`,
 /// `Outline|Focus|Preview`), which conflate two separate ideas. They are split
-/// here: **mode** changes the workspace layout, while the sidebar and preview
-/// are independent pane toggles. Board and Production modes land in M8 and M7.
+/// here: **mode** changes the workspace layout, while the sidebar, preview and
+/// inspector are independent pane toggles.
 struct RootView: View {
     @Bindable var model: ScreenplayModel
     let document: ScreenplayDocument
@@ -17,6 +17,8 @@ struct RootView: View {
     @State private var selection: OutlineSelection?
     @State private var isEditingTitlePage = false
     @AppStorage(PrefKey.editorFontSize) private var editorFontSize = EditorTypeSize.default
+    @AppStorage(PrefKey.autoFixEnabled) private var autoFixEnabled = AutoLint.defaultEnabled
+    @AppStorage(PrefKey.disabledLintRules) private var disabledLintRules = ""
 
     /// `session` is injectable so a test can move the caret from outside and
     /// watch what re-renders. Owning it as `@State` is otherwise correct — it is
@@ -71,9 +73,6 @@ struct RootView: View {
             document.noteTextEdited()
         }
         .onChange(of: model.workspace) { _, mode in
-            // Production is the writing layout with the inspector open; the
-            // inspector stays an independent toggle everywhere else.
-            if mode == .production { model.showsInspector = true }
             if mode == .board {
                 // The board mock is a planning workspace: navigator, cards and
                 // selected-scene metadata belong together. They remain normal
@@ -91,12 +90,45 @@ struct RootView: View {
                 }
             }
         }
+        .onChange(of: model.revision) { _, _ in
+            runAutoFix()
+        }
         .onChange(of: selection) { _, target in
             // Selecting in the sidebar moves the caret, which is what makes the
             // list a navigator rather than a read-only outline.
             guard let offset = target?.sourceOffset(in: model.script) else { return }
             session.jump(to: offset)
         }
+    }
+
+    /// Applies the enabled auto-fixes once a parse has settled.
+    ///
+    /// Reading `session.state` here does **not** subscribe this view to the
+    /// caret: an `onChange` action runs outside SwiftUI's observation tracking,
+    /// which only records reads made while a body is evaluating. That
+    /// distinction is the whole reason `RootView.body` can avoid touching
+    /// `session.state` while this can — see the note on `body`.
+    ///
+    /// The loop terminates because the fixes are computed from the diagnostics
+    /// of the parse that just landed: applying them changes the text, which
+    /// parses again, and that parse no longer reports them. `AutoFixTests`
+    /// pins the fixed point.
+    private func runAutoFix() {
+        guard autoFixEnabled else { return }
+        let source = model.text as NSString
+        let caret = session.state.selectedRanges.first?.location ?? 0
+        // Whole lines: a fix anywhere on the line being written is a fix under
+        // the writer's hands.
+        let protected = source.lineRange(
+            for: NSRange(location: min(max(caret, 0), source.length), length: 0)
+        )
+        session.apply(
+            AutoFix.edits(
+                for: model.diagnostics,
+                excluding: AutoLint.decode(disabledLintRules),
+                protecting: protected
+            )
+        )
     }
 
     @ViewBuilder
@@ -154,11 +186,7 @@ struct RootView: View {
 
             if model.showsPreview {
                 Divider()
-                PreviewPane(
-                    paginated: model.paginated,
-                    session: session,
-                    showsPages: $model.previewShowsPages
-                )
+                PreviewPane(paginated: model.paginated, session: session)
                 .frame(minWidth: Style.previewMinimumWidth)
             }
 
@@ -172,22 +200,11 @@ struct RootView: View {
 
     private var editorPane: some View {
         VStack(spacing: 0) {
-            PaneHeader(title: "FOUNTAIN") {
-                Picker("", selection: $model.mode) {
-                    ForEach(EditorMode.allCases, id: \.self) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .fixedSize()
-                .accessibilityIdentifier("editor.mode")
-            }
+            PaneHeader(title: "FOUNTAIN") { EmptyView() }
             FountainEditorSurface(
                 text: $model.text,
                 script: model.script,
                 diagnostics: model.diagnostics,
-                mode: model.mode,
                 fontSize: CGFloat(EditorTypeSize.resolve(editorFontSize)),
                 revision: model.revision,
                 replacementToken: model.replacementToken,
@@ -214,7 +231,10 @@ struct RootView: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-            .frame(width: 276)
+            // Sized to its content rather than to a number. It was 276pt wide
+            // for three options and 184 for two, both of which left the control
+            // stretched well past the words in it.
+            .fixedSize()
             .accessibilityIdentifier("workspace.mode")
         }
         ToolbarItem(placement: .navigation) {
@@ -276,7 +296,6 @@ struct RootView: View {
 private struct PreviewPane: View {
     let paginated: PaginatedScript?
     let session: FountainEditorSession
-    @Binding var showsPages: Bool
 
     var body: some View {
         #if DEBUG
@@ -286,8 +305,7 @@ private struct PreviewPane: View {
             paginated: paginated,
             caretPage: paginated?.pageIndex(
                 forSourceOffset: session.state.selectedRanges.first?.location ?? 0
-            ),
-            showsPages: $showsPages
+            )
         )
     }
 }
@@ -334,7 +352,6 @@ private struct StatusBar: View {
                 .accessibilityLabel("Line \(session.state.caretLine), Column \(session.state.caretColumn)")
             Divider()
                 .frame(height: 14)
-            Label(model.mode.title, systemImage: "doc.plaintext")
             DiagnosticsSummary(
                 warnings: model.warningCount,
                 suggestions: model.suggestionCount,

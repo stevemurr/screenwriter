@@ -34,7 +34,6 @@ public final class ScreenplayModel {
     /// so the preview predicts the PDF rather than approximating it.
     public private(set) var paginated: PaginatedScript?
     public var printSettings = PrintSettings.highland
-    public var previewShowsPages = true
     public var showsDiagnostics = false
     /// Bumped on every reparse so the editor surface knows the styling is stale.
     public private(set) var revision: UInt64 = 0
@@ -42,7 +41,6 @@ public final class ScreenplayModel {
     /// revert — never by a user edit.
     public private(set) var replacementToken: UInt64 = 0
 
-    public var mode: EditorMode = .plainText
     public var workspace: WorkspaceMode = .write
     public var showsPreview = true
     public var showsOutline = true
@@ -283,24 +281,26 @@ extension ScreenplayModel {
     }
 }
 
-/// The workspace layouts from the mockups.
+/// The workspace layouts.
 ///
-/// The three mockups drew three different segmented controls, conflating two
-/// ideas: which tools are on screen, and which panes are open. Only the first is
-/// a mode. The sidebar, preview, and inspector stay independent toggles.
+/// The mockups drew three different segmented controls, conflating two ideas:
+/// which tools are on screen, and which panes are open. Only the first is a
+/// mode. The sidebar, preview, and inspector stay independent toggles.
+///
+/// There were three modes; `production` was the writing layout with the
+/// inspector opened for you, which is what the inspector toggle already does.
+/// A mode that differs from another only by the state of a control the user can
+/// see is not a mode.
 public enum WorkspaceMode: String, CaseIterable, Sendable {
     /// Scenes, source, preview — the writing layout.
     case write
     /// The beat board: sequence columns of draggable scene cards.
     case board
-    /// Adds the production inspector to the writing layout.
-    case production
 
     public var title: String {
         switch self {
         case .write: return "Write"
         case .board: return "Board"
-        case .production: return "Production"
         }
     }
 }

@@ -24,7 +24,6 @@ struct PagePreview: View {
     /// 89,287 caret positions, 86 change page — 99.9% of those scrolls only
     /// undid the writer's own scrolling.
     let caretPage: Int?
-    @Binding var showsPages: Bool
 
     private var layout: PageLayout { PageLayout.letter }
 
@@ -43,14 +42,6 @@ struct PagePreview: View {
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("preview.pageNumber")
                     }
-                    Picker("", selection: $showsPages) {
-                        Text("Page").tag(true)
-                        Text("Continuous").tag(false)
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .fixedSize()
-                    .accessibilityIdentifier("preview.mode")
                 }
             }
 
@@ -77,18 +68,17 @@ struct PagePreview: View {
 
     private func pageScroller(_ paginated: PaginatedScript) -> some View {
         GeometryReader { geometry in
-            let pagePadding: CGFloat = showsPages ? 20 : 0
+            let pagePadding: CGFloat = 20
             let availableWidth = max(1, geometry.size.width - pagePadding * 2)
             let previewScale = min(1, availableWidth / layout.pageWidth)
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: showsPages ? 20 : 0) {
+                    LazyVStack(spacing: 20) {
                         ForEach(paginated.pages) { page in
                             PageCanvas(
                                 page: page,
                                 layout: layout,
-                                separated: showsPages,
                                 scale: previewScale
                             )
                             .id(page.index)
@@ -122,23 +112,11 @@ struct PagePreview: View {
 struct PageCanvas: View {
     let page: PaginatedPage
     let layout: PageLayout
-    /// Page mode draws a paper card; continuous mode runs the text together.
-    let separated: Bool
     /// Preview-only scaling. Pagination and export retain full-size coordinates.
     let scale: CGFloat
 
     /// Asked for, never guessed: `Font.custom` fails silently on a bad name.
     private var fontName: String { ScreenplayFont.postScriptName }
-
-    /// Continuous mode trims the page's empty top and bottom margins so the text
-    /// flows without a band of white between every page.
-    private var height: CGFloat {
-        guard !separated else { return layout.pageHeight }
-        let lastRow = page.lines.filter { !$0.isBlank }.map(\.y).max() ?? layout.bodyTop
-        return lastRow + layout.lineHeight * 2
-    }
-
-    private var topInset: CGFloat { separated ? 0 : -layout.bodyTop + layout.lineHeight }
 
     var body: some View {
         Canvas { context, _ in
@@ -146,11 +124,11 @@ struct PageCanvas: View {
             for line in page.lines where !line.isBlank {
                 context.draw(
                     Text(styled(line)),
-                    at: CGPoint(x: line.x, y: line.y + topInset),
+                    at: CGPoint(x: line.x, y: line.y),
                     anchor: .topLeading
                 )
             }
-            if separated, let label = pageLabel {
+            if let label = pageLabel {
                 context.draw(
                     Text(label)
                         .font(.custom(fontName, size: layout.fontSize))
@@ -160,10 +138,10 @@ struct PageCanvas: View {
                 )
             }
         }
-        .frame(width: layout.pageWidth * scale, height: height * scale)
+        .frame(width: layout.pageWidth * scale, height: layout.pageHeight * scale)
         .background(Style.paper)
-        .clipShape(RoundedRectangle(cornerRadius: separated ? Style.cornerRadius : 0))
-        .shadow(color: separated ? .black.opacity(0.22) : .clear, radius: 6, y: 2)
+        .clipShape(RoundedRectangle(cornerRadius: Style.cornerRadius))
+        .shadow(color: .black.opacity(0.22), radius: 6, y: 2)
     }
 
     /// Page 1 is unnumbered, and a title page never carries one.

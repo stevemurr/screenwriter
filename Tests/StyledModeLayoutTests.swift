@@ -30,15 +30,14 @@ final class StyledModeLayoutTests: XCTestCase {
 
     """
 
-    private func host(mode: EditorMode, width: CGFloat = 760) throws -> EditorHostView {
+    private func host(width: CGFloat = 760) throws -> EditorHostView {
         let host = EditorHostView(frame: NSRect(x: 0, y: 0, width: width, height: 700))
         host.textView.string = sample
-        host.setShowsLineNumbers(mode == .plainText)
-        host.setScriptColumn(mode == .styled ? Style.scriptColumnWidth : nil)
+        host.setScriptColumn(Style.scriptColumnWidth)
         host.layoutSubtreeIfNeeded()
 
         let script = ScriptParser.parse(sample)
-        let styler = ElementStyler(mode: mode)
+        let styler = ElementStyler()
         let storage = try XCTUnwrap(host.textView.textStorage)
         storage.beginEditing()
         storage.setAttributes(
@@ -79,7 +78,7 @@ final class StyledModeLayoutTests: XCTestCase {
     }
 
     func testStyledModeLaysElementsOutAtHighlandIndents() throws {
-        let host = try host(mode: .styled)
+        let host = try host()
         let measured = try measuredIndents(in: host)
         let layout = PageLayout.letter
 
@@ -110,7 +109,7 @@ final class StyledModeLayoutTests: XCTestCase {
     }
 
     func testTransitionIsRightAligned() throws {
-        let host = try host(mode: .styled)
+        let host = try host()
         let measured = try measuredIndents(in: host)
         let action = try XCTUnwrap(measured["Rain maps the windows in silver veins."])
         let transition = try XCTUnwrap(measured["> CUT TO:"])
@@ -118,27 +117,17 @@ final class StyledModeLayoutTests: XCTestCase {
                              "A transition should be pushed to the right margin.")
     }
 
-    func testPlainModeAppliesNoScreenplayIndents() throws {
-        let host = try host(mode: .plainText)
-        let measured = try measuredIndents(in: host)
-        let action = try XCTUnwrap(measured["Rain maps the windows in silver veins."])
-        let character = try XCTUnwrap(measured["MARA"])
-        // Plain text is source, not typesetting — every line starts at the same
-        // place so the gutter's line numbers line up with what was typed.
-        XCTAssertEqual(character, action, accuracy: 0.5)
-    }
-
     func testStyledModeDoesNotAlterTheDocument() throws {
         // Rule 2: indents, colour, and dimmed marks are attributes. The user's
         // bytes are what they typed.
-        let host = try host(mode: .styled)
+        let host = try host()
         XCTAssertEqual(host.textView.string, sample)
     }
 
     func testForcedMarksAreDimmedNotRemoved() throws {
         let source = "@MARA\nHello.\n"
         let script = ScriptParser.parse(source)
-        let runs = ElementStyler(mode: .styled).runs(for: script)
+        let runs = ElementStyler().runs(for: script)
         // The `@` keeps its place in the text and simply recedes.
         let markRun = runs.first {
             $0.range.length == 1 && $0.range.location == 0
@@ -154,16 +143,11 @@ final class StyledModeLayoutTests: XCTestCase {
         guard let path = ProcessInfo.processInfo.environment["SCREENWRITER_LAYOUT_SNAPSHOT"] else {
             throw XCTSkip("Set SCREENWRITER_LAYOUT_SNAPSHOT to write a snapshot.")
         }
-        for (mode, suffix) in [(EditorMode.styled, "styled"), (EditorMode.plainText, "plain")] {
-            let host = try host(mode: mode)
-            let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-            host.cacheDisplay(in: host.bounds, to: rep)
-            let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
-            let url = URL(fileURLWithPath: path)
-                .deletingPathExtension()
-                .appendingPathExtension("\(suffix).png")
-            try png.write(to: url)
-        }
+        let host = try host()
+        let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        try png.write(to: URL(fileURLWithPath: path))
     }
 }
 
@@ -197,12 +181,6 @@ final class EditorAccessibilityTests: XCTestCase {
         XCTAssertTrue(children.first === host.textView)
     }
 
-    func testTheLineNumberRulerIsNotAnAccessibilityElement() {
-        // A gutter full of numbers would be noise for anything reading the
-        // document, and would give XCUITest a second thing to match.
-        let host = EditorHostView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
-        XCTAssertFalse(host.rulerView.isAccessibilityElement())
-    }
 }
 
 /// The editor's type size is a reading preference, not a page setting.
@@ -215,7 +193,7 @@ final class EditorTypeSizeTests: XCTestCase {
         // at its 12pt column.
         let script = ScriptParser.parse("INT. A - DAY\n\nMARA\nHello.\n")
         func dialogueIndent(at size: CGFloat) throws -> CGFloat {
-            let styler = ElementStyler(mode: .styled, fontSize: size)
+            let styler = ElementStyler(fontSize: size)
             let dialogue = try XCTUnwrap(script.elements.first { $0.kind == .dialogue })
             let run = try XCTUnwrap(styler.runs(for: script).first { $0.range == dialogue.range })
             let style = try XCTUnwrap(run.attributes[.paragraphStyle] as? NSParagraphStyle)
@@ -234,7 +212,7 @@ final class EditorTypeSizeTests: XCTestCase {
         let pages = model.pageCount
         let layout = PageLayout.letter
 
-        _ = ElementStyler(mode: .styled, fontSize: 24)
+        _ = ElementStyler(fontSize: 24)
         XCTAssertEqual(PageLayout.letter.fontSize, layout.fontSize)
         XCTAssertEqual(model.pageCount, pages, "Editor type size must not move a page break.")
     }
@@ -249,7 +227,7 @@ final class EditorTypeSizeTests: XCTestCase {
     }
 
     func testPlainModeUsesTheSizeToo() throws {
-        let styler = ElementStyler(mode: .plainText, fontSize: 18)
+        let styler = ElementStyler(fontSize: 18)
         let font = try XCTUnwrap(styler.baseAttributes()[.font] as? NSFont)
         XCTAssertEqual(font.pointSize, 18)
     }

@@ -64,19 +64,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         frontmostModel.map { $0.showsPreview.toggle() }
     }
 
-    @objc func showPlainText(_ sender: Any?) {
-        frontmostModel?.mode = .plainText
-    }
-
-    @objc func showStyled(_ sender: Any?) {
-        frontmostModel?.mode = .styled
-    }
-
     @objc func showWriteMode(_ sender: Any?) { frontmostModel?.workspace = .write }
     @objc func showBoardMode(_ sender: Any?) { frontmostModel?.workspace = .board }
-    @objc func showProductionMode(_ sender: Any?) {
-        frontmostModel?.workspace = .production
-        frontmostModel?.showsInspector = true
+
+    @objc func toggleInspector(_ sender: Any?) {
+        frontmostModel.map { $0.showsInspector.toggle() }
     }
 
     @objc func showTitlePage(_ sender: Any?) {

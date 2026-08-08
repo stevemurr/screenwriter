@@ -103,7 +103,6 @@ final class PreviewIntegrationTests: XCTestCase {
             rootView: PagePreview(
                 paginated: model.paginated,
                 caretPage: 0,
-                showsPages: .constant(true)
             )
             .frame(width: 700, height: 900)
         )

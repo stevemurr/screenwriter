@@ -83,14 +83,13 @@ final class TypingCostTests: XCTestCase {
     ) -> (host: EditorHostView, model: ScreenplayModel, coordinator: FountainEditorSurface.Coordinator) {
         let model = ScreenplayModel()
         model.load(source)
-        model.mode = .styled
 
         let host = EditorHostView(frame: NSRect(x: 0, y: 0, width: 760, height: 600))
         host.setScriptColumn(Style.scriptColumnWidth)
         host.textView.string = source
         host.layoutSubtreeIfNeeded()
 
-        let styler = ElementStyler(mode: .styled, fontSize: 12)
+        let styler = ElementStyler(fontSize: 12)
         host.applyStyle(base: styler.baseAttributes(), runs: styler.runs(for: model.script))
         host.layoutSubtreeIfNeeded()
 
@@ -98,7 +97,6 @@ final class TypingCostTests: XCTestCase {
             text: Binding(get: { model.text }, set: { model.text = $0 }),
             script: model.script,
             diagnostics: model.diagnostics,
-            mode: .styled,
             fontSize: 12,
             revision: model.revision,
             replacementToken: model.replacementToken,
@@ -137,8 +135,11 @@ final class TypingCostTests: XCTestCase {
         let (host, _, _) = makeEditor(TypingWorkload.script)
         let median = medianKeystroke(host)
 
-        // Measured on this machine: 1.56ms release, 2.03ms debug, against
-        // 0.95ms for AppKit inserting the character with no delegate attached.
+        // Measured on this machine: 2.29ms debug, against 0.95ms for AppKit
+        // inserting the character with no delegate attached. It was 2.03ms
+        // before live styling, which classifies the edited block and writes its
+        // attributes on every keystroke — 0.26ms to never lay the text out
+        // twice. See `LiveStyler`.
         // Before this work it was 12.8ms release. One budget for both
         // configurations because the two are close — everything expensive here
         // is Foundation and AppKit, already compiled optimised either way — with
@@ -159,7 +160,7 @@ final class TypingCostTests: XCTestCase {
         bare.setScriptColumn(Style.scriptColumnWidth)
         bare.textView.string = TypingWorkload.script
         bare.layoutSubtreeIfNeeded()
-        let styler = ElementStyler(mode: .styled, fontSize: 12)
+        let styler = ElementStyler(fontSize: 12)
         let parsed = ScriptParser.parse(TypingWorkload.script)
         bare.applyStyle(base: styler.baseAttributes(), runs: styler.runs(for: parsed))
         bare.layoutSubtreeIfNeeded()
@@ -415,7 +416,7 @@ final class EditorTextSnapshotTests: XCTestCase {
 
         let surface = FountainEditorSurface(
             text: Binding(get: { model.text }, set: { model.text = $0 }),
-            script: model.script, diagnostics: model.diagnostics, mode: .styled,
+            script: model.script, diagnostics: model.diagnostics,
             fontSize: 12, revision: model.revision,
             replacementToken: model.replacementToken, session: FountainEditorSession()
         )

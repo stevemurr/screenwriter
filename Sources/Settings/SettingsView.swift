@@ -3,6 +3,15 @@ import SwiftUI
 
 struct SettingsView: View {
     @AppStorage(PrefKey.editorFontSize) private var editorFontSize = EditorTypeSize.default
+    @AppStorage(PrefKey.autoFixEnabled) private var autoFixEnabled = AutoLint.defaultEnabled
+    @AppStorage(PrefKey.disabledLintRules) private var disabledLintRules = ""
+
+    private func binding(for rule: LintRule) -> Binding<Bool> {
+        Binding(
+            get: { AutoLint.isEnabled(rule, disabled: disabledLintRules) },
+            set: { disabledLintRules = AutoLint.setting(rule, enabled: $0, in: disabledLintRules) }
+        )
+    }
 
     /// Highland's PDFs measure 7.1904pt per character. A mismatch means
     /// exported pages will not line up with theirs, so it is shown rather than
@@ -45,6 +54,29 @@ struct SettingsView: View {
                     "Affects only what you type on. Pages, the preview, and exported "
                     + "PDFs are always set at 12 pt, so changing this cannot move a "
                     + "page break."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Fix issues as I write", isOn: $autoFixEnabled)
+                    .accessibilityIdentifier("settings.autoFix")
+
+                ForEach(AutoLint.configurableRules, id: \.self) { rule in
+                    Toggle(rule.title, isOn: binding(for: rule))
+                        .disabled(!autoFixEnabled)
+                        .accessibilityIdentifier("settings.lint.\(rule.rawValue)")
+                }
+                .padding(.leading, 16)
+            } header: {
+                Text("Linting")
+            } footer: {
+                Text(
+                    "Only rules that change how a line reads — a dash, a case, a missing "
+                    + "period, invisible trailing spaces. Anything that would move a scene "
+                    + "stays a suggestion you apply yourself, and the line you are typing on "
+                    + "is never touched."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)

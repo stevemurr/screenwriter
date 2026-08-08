@@ -108,7 +108,12 @@ public enum ScriptParser {
 
     // MARK: - Line classification
 
-    private static func classify(
+    /// Internal rather than private so `LiveClassifier` can classify a window of
+    /// lines through the *same* code path the full pass uses. Two classifiers
+    /// that agree by construction is the whole point: the editor styles a block
+    /// as it is typed, and the debounced full parse must then find nothing to
+    /// change.
+    static func classify(
         _ raw: String,
         line: LineIndex.Line,
         index: LineIndex,
@@ -439,7 +444,7 @@ public enum ScriptParser {
         return trimmedWhitespace(name)
     }
 
-    private static func make(
+    static func make(
         _ kind: ElementKind,
         _ line: LineIndex.Line,
         text: String,

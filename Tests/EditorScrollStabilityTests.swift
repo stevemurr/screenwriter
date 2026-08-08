@@ -34,7 +34,7 @@ final class EditorScrollStabilityTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
 
         let script = ScriptParser.parse(Self.longScript)
-        let styler = ElementStyler(mode: .styled, fontSize: 12)
+        let styler = ElementStyler(fontSize: 12)
         // Style once so the document is laid out as it would be in use.
         host.applyStyle(
             base: styler.baseAttributes(),
@@ -59,7 +59,7 @@ final class EditorScrollStabilityTests: XCTestCase {
         let before = scrollToMiddle(host)
         XCTAssertGreaterThan(before.y, 0, "The test needs a document long enough to scroll.")
 
-        let styler = ElementStyler(mode: .styled, fontSize: 12)
+        let styler = ElementStyler(fontSize: 12)
         host.applyStyle(base: styler.baseAttributes(), runs: styler.runs(for: script))
         host.layoutSubtreeIfNeeded()
 
@@ -78,7 +78,7 @@ final class EditorScrollStabilityTests: XCTestCase {
         let caret = NSRange(location: 12_000, length: 0)
         host.textView.selectedRanges = [NSValue(range: caret)]
 
-        let styler = ElementStyler(mode: .styled, fontSize: 12)
+        let styler = ElementStyler(fontSize: 12)
         host.applyStyle(base: styler.baseAttributes(), runs: styler.runs(for: script))
 
         XCTAssertEqual(host.textView.selectedRanges.first?.rangeValue, caret)
@@ -111,7 +111,7 @@ final class EditorScrollStabilityTests: XCTestCase {
         host.scrollView.contentView.scroll(to: .zero)
         host.scrollView.reflectScrolledClipView(host.scrollView.contentView)
 
-        let styler = ElementStyler(mode: .styled, fontSize: 12)
+        let styler = ElementStyler(fontSize: 12)
         host.applyStyle(base: styler.baseAttributes(), runs: styler.runs(for: script))
         host.layoutSubtreeIfNeeded()
 
@@ -147,7 +147,7 @@ final class EditorScrollRegressionTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
 
         let parsed = ScriptParser.parse(script)
-        let styler = ElementStyler(mode: .styled, fontSize: 12)
+        let styler = ElementStyler(fontSize: 12)
         host.applyStyle(base: styler.baseAttributes(), runs: styler.runs(for: parsed))
         host.layoutSubtreeIfNeeded()
 
@@ -187,25 +187,29 @@ final class EditorScrollRegressionTests: XCTestCase {
     }
 }
 
-/// Switching between Plain Text and Styled changes the geometry — the gutter
-/// appears or disappears and the column width changes — so the exact origin is
-/// meaningless. What must hold is that the same line stays at the top.
+/// Changing the type size changes the geometry — the column scales and every
+/// line re-wraps — so the exact scroll origin afterwards is meaningless. What
+/// must hold is that the same line stays at the top.
+///
+/// This used to be the Plain Text/Styled switch, which was the other thing that
+/// re-laid the document out. There is one surface now, so type size is the
+/// relayout that remains, and it is the same property.
 @MainActor
-final class EditorModeSwitchScrollTests: XCTestCase {
+final class EditorTypeSizeScrollTests: XCTestCase {
 
-    func testSwitchingModeKeepsTheSameLineAtTheTop() throws {
+    func testChangingTypeSizeKeepsTheSameLineAtTheTop() throws {
         let script = (1...300).map { index in
             "INT. LOCATION \(index) - NIGHT\n\nSomebody waits in the rain.\n\n"
         }.joined()
 
         let host = EditorHostView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         host.textView.string = script
-        host.setShowsLineNumbers(true)
+        host.setScriptColumn(Style.scriptColumnWidth)
         host.layoutSubtreeIfNeeded()
 
         let parsed = ScriptParser.parse(script)
-        let plain = ElementStyler(mode: .plainText, fontSize: 12)
-        host.applyStyle(base: plain.baseAttributes(), runs: plain.runs(for: parsed))
+        let small = ElementStyler(fontSize: 12)
+        host.applyStyle(base: small.baseAttributes(), runs: small.runs(for: parsed))
         host.layoutSubtreeIfNeeded()
 
         host.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 3000))
@@ -223,25 +227,32 @@ final class EditorModeSwitchScrollTests: XCTestCase {
         let before = topCharacterOffset()
         XCTAssertGreaterThan(before, 0)
 
-        // Switch to styled: gutter off, column narrower, everything re-laid out.
-        host.setShowsLineNumbers(false)
-        host.setScriptColumn(Style.scriptColumnWidth)
-        let styled = ElementStyler(mode: .styled, fontSize: 12)
-        host.applyStyle(base: styled.baseAttributes(), runs: styled.runs(for: parsed))
+        // Twice the type: wider column, every line re-laid out.
+        host.setScriptColumn(Style.scriptColumnWidth * 2)
+        let large = ElementStyler(fontSize: 24)
+        host.invalidateAppliedStyle()
+        host.applyStyle(base: large.baseAttributes(), runs: large.runs(for: parsed))
         host.layoutSubtreeIfNeeded()
 
-        // Put the anchor back at the top, as the coordinator does.
-        guard let location = content.location(content.documentRange.location, offsetBy: before),
-              let fragment = layout.textLayoutFragment(for: location) else {
-            return XCTFail("Anchor no longer resolves after the mode switch.")
-        }
-        host.scrollView.contentView.scroll(
-            to: NSPoint(x: 0, y: fragment.layoutFragmentFrame.minY + host.textView.textContainerOrigin.y)
+        // The app's own restore, not a copy of it. A copy of this logic in this
+        // test passed while the app scrolled to the top of the script.
+        host.restoreScroll(anchor: EditorScrollAnchor(characterOffset: before))
+        host.layoutSubtreeIfNeeded()
+
+        // Near the anchor, not at the top of the document.
+        //
+        // Exact equality is not available here and asking for it would be
+        // asking for the wrong thing: doubling the type re-heights every
+        // fragment, so where a character *is* changes as layout resolves, and
+        // the anchor is a character offset precisely because points are not
+        // stable across that. What must hold is that the writer is left where
+        // they were reading. Before `restoreScroll` laid out as far as the
+        // anchor, this returned **0** — the top of a 300-scene script.
+        let after = topCharacterOffset()
+        XCTAssertGreaterThan(after, 0, "the anchor was lost and the view jumped to the top")
+        XCTAssertLessThan(
+            abs(after - before), 600,
+            "the anchor landed \(after) against \(before) — more than a screen away"
         )
-        host.scrollView.reflectScrolledClipView(host.scrollView.contentView)
-        host.layoutSubtreeIfNeeded()
-
-        // The same character is at the top, even though the y differs.
-        XCTAssertEqual(topCharacterOffset(), before)
     }
 }

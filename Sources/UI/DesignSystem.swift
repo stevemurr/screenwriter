@@ -36,7 +36,6 @@ public enum Style {
     public static let paneHeaderHeight: CGFloat = 40
     public static let statusBarHeight: CGFloat = 30
     public static let cornerRadius: CGFloat = 8
-    public static let gutterWidth: CGFloat = 46
 
     public static let sidebarWidth: CGFloat = 268
     public static let inspectorWidth: CGFloat = 312
