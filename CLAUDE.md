@@ -178,6 +178,14 @@ layer, separately and testably — never by refusing to parse.
 - FountainKit uses swift-testing (`import Testing`); the app targets use XCTest.
 - Accessibility identifiers on anything a UI test touches, dotted:
   `editor.surface`, `scenes.list`, `status.words`.
+- The app icon is generated, not hand-drawn. `swift Resources/AppIcon/make-icon.swift`
+  redraws `Screenwriter.icns` from vectors and leaves a `preview-1024.png` to
+  eyeball. Sizes ≤ 64 deliberately use a **separate, chunkier set of marks**: a
+  16pt mark is half a pixel at 32×32, so it renders at half contrast and
+  adjacent lines merge into one grey mass. Reference it in `project.yml` as the
+  single `.icns` path, never the enclosing group — `Resources/AppIcon/` also
+  holds the generator, which would otherwise be compiled into the app.
+  `AppIconTests` pins both the bundling and the small-size separation.
 
 ## Reference corpus
 
