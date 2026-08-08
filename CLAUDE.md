@@ -163,6 +163,19 @@ trailing period, parentheticals on the cue line, and `.`/`>` used as generic
 force marks. The parser accepts all of it. Ambiguity is reported by the lint
 layer, separately and testably — never by refusing to parse.
 
+### Rule 15: A scene's range is not what a scene move should carry
+`ScriptScene.range` runs from a heading to the *next scene heading*, so a section
+heading between two scenes falls inside the one above it. Moving a scene by that
+range takes the next sequence's `##` with it and silently restructures the
+outline — measured on the board's own fixture, two of four scenes carried a
+heading they did not own. `SceneReorder.movableRange` clips at the first section
+heading; the board and the sidebar both go through it.
+
+The same distinction governs a board column's *end*. "After everything in this
+column" is `NSMaxRange(section.range)` — where the next heading begins — not the
+first scene of the next column, which is one heading further on. Dropping a card
+at the bottom of a column used to file it under the column below.
+
 ## Conventions
 
 - `@Observable`, never `ObservableObject`. Pass models to sub-views as plain

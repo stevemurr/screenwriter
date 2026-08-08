@@ -95,24 +95,157 @@ final class BeatBoardTests: XCTestCase {
         XCTAssertEqual(loose.sceneIndices, [1])
     }
 
-    func testDroppingPastTheLastCardLandsBeforeTheNextColumn() throws {
-        let script = ScriptParser.parse(sequenced)
-        let layout = BoardLayout(script: script)
-        let arrival = try XCTUnwrap(layout.columns.first)
+    /// The bug this replaced: "after everything in Arrival" resolved to *before
+    /// the first scene of The Test*, which is one heading too far — the card
+    /// landed under The Test's heading and joined the wrong column. Measured on
+    /// this fixture, dropping CLIFF ROAD at the bottom of Arrival produced
+    /// `Arrival [1, 2]`, `The Test [3, 4]`.
+    func testDroppingBelowTheLastCardStaysInThatColumn() throws {
+        let model = ScreenplayModel()
+        model.load(sequenced)
+        let layout = BoardLayout(script: model.script)
+        let arrival = try XCTUnwrap(layout.columns.first { $0.title == "Arrival" })
 
-        // "After everything in Arrival" is, in document order, immediately
-        // before the first scene of The Test — not the end of the script.
-        XCTAssertEqual(layout.destination(dropInto: arrival.id, at: 2), 3)
-        // And past the last card of the last column really is the end.
-        let blackout = try XCTUnwrap(layout.columns.last)
-        XCTAssertNil(layout.destination(dropInto: blackout.id, at: 1))
+        // Drag the cliff-road scene to the bottom of Arrival.
+        let drop = try XCTUnwrap(layout.drop(scene: 4, into: arrival.id, at: 2))
+        guard case .offset(let insertion) = drop else {
+            return XCTFail("the end of a column is an offset, not a scene: \(drop)")
+        }
+        let range = try XCTUnwrap(SceneReorder.movableRange(ofSceneAt: 4, in: model.script))
+        let edit = try XCTUnwrap(
+            SceneReorder.move(range: range, to: insertion, in: model.script.source)
+        )
+        model.apply(edit, undoManager: nil)
+
+        let after = BoardLayout(script: model.script)
+        let updated = try XCTUnwrap(after.columns.first { $0.title == "Arrival" })
+        XCTAssertEqual(
+            updated.sceneIndices.count, 3,
+            "the card was dropped at the bottom of Arrival and did not stay there"
+        )
+        XCTAssertEqual(
+            model.script.scenes.first { $0.index == updated.sceneIndices.last }?.heading,
+            "EXT. CLIFF ROAD - DAWN"
+        )
     }
 
     func testDroppingOnACardLandsBeforeIt() throws {
         let layout = BoardLayout(script: ScriptParser.parse(sequenced))
-        let arrival = try XCTUnwrap(layout.columns.first)
-        XCTAssertEqual(layout.destination(dropInto: arrival.id, at: 0), 1)
-        XCTAssertEqual(layout.destination(dropInto: arrival.id, at: 1), 2)
+        let arrival = try XCTUnwrap(layout.columns.first { $0.title == "Arrival" })
+        // Scene 4 comes from another column, so there is no direction of travel:
+        // a drop means "before this one" either way.
+        XCTAssertEqual(layout.drop(scene: 4, into: arrival.id, at: 0), .before(scene: 1))
+        XCTAssertEqual(layout.drop(scene: 4, into: arrival.id, at: 1), .before(scene: 2))
+    }
+
+    /// Dragging a card *down* one slot used to do nothing at all: "insert before
+    /// the card you dropped on" is where it already was, so it sprang back.
+    func testDraggingACardDownwardMovesIt() throws {
+        let model = ScreenplayModel()
+        model.load(sequenced)
+        let layout = BoardLayout(script: model.script)
+        let arrival = try XCTUnwrap(layout.columns.first { $0.title == "Arrival" })
+        XCTAssertEqual(arrival.sceneIndices, [1, 2])
+
+        // Card 1 dropped onto card 2 — one slot down, which is past it.
+        let drop = try XCTUnwrap(layout.drop(scene: 1, into: arrival.id, at: 1))
+        guard case .offset(let insertion) = drop else {
+            return XCTFail("past the last card of the column is an offset: \(drop)")
+        }
+        let range = try XCTUnwrap(SceneReorder.movableRange(ofSceneAt: 1, in: model.script))
+        let edit = try XCTUnwrap(
+            SceneReorder.move(range: range, to: insertion, in: model.script.source)
+        )
+        model.apply(edit, undoManager: nil)
+
+        XCTAssertEqual(
+            model.script.scenes.prefix(2).map(\.heading),
+            ["EXT. GARDEN - NIGHT", "INT. GLASS HOUSE - NIGHT"],
+            "the two cards did not swap"
+        )
+    }
+
+    /// Dragging *up* keeps the plain meaning, so the two directions do not both
+    /// resolve to the same slot.
+    func testDraggingACardUpwardInsertsBeforeIt() throws {
+        let layout = BoardLayout(script: ScriptParser.parse(sequenced))
+        let arrival = try XCTUnwrap(layout.columns.first { $0.title == "Arrival" })
+        XCTAssertEqual(layout.drop(scene: 2, into: arrival.id, at: 0), .before(scene: 1))
+        XCTAssertNil(layout.drop(scene: 1, into: arrival.id, at: 0), "onto itself")
+    }
+
+    /// An empty column advertises "Drop a scene here". It has to be true.
+    func testAnEmptyColumnCanBeDroppedInto() throws {
+        let source = """
+        # Act One
+
+        ## Arrival
+
+        INT. GLASS HOUSE - NIGHT
+
+        Rain needles the windows.
+
+        ## Empty Beat
+
+        # Act Two
+
+        ## Blackout
+
+        EXT. CLIFF ROAD - DAWN
+
+        They drive.
+
+        """
+        let model = ScreenplayModel()
+        model.load(source)
+        let layout = BoardLayout(script: model.script)
+        let empty = try XCTUnwrap(layout.columns.first { $0.title == "Empty Beat" })
+        XCTAssertTrue(empty.sceneIndices.isEmpty)
+
+        let drop = try XCTUnwrap(layout.drop(scene: 2, into: empty.id, at: 0))
+        guard case .offset(let insertion) = drop else {
+            return XCTFail("an empty column resolves to an offset: \(drop)")
+        }
+        let range = try XCTUnwrap(SceneReorder.movableRange(ofSceneAt: 2, in: model.script))
+        let edit = try XCTUnwrap(
+            SceneReorder.move(range: range, to: insertion, in: model.script.source)
+        )
+        model.apply(edit, undoManager: nil)
+
+        let after = BoardLayout(script: model.script)
+        XCTAssertEqual(
+            after.columns.first { $0.title == "Empty Beat" }?.sceneIndices.count, 1,
+            "a scene dropped into the empty column did not arrive there"
+        )
+    }
+
+    /// A scene's range runs to the next *scene* heading, so a section heading
+    /// between two scenes falls inside it. Dragging the last card of a column
+    /// used to take the next column's heading along with it.
+    func testMovingACardDoesNotCarryTheNextColumnsHeading() throws {
+        let model = ScreenplayModel()
+        model.load(sequenced)
+
+        // The premise: scene 2's own range really does contain `## The Test`.
+        let scene = try XCTUnwrap(model.script.scenes.first { $0.index == 2 })
+        XCTAssertTrue(
+            (model.text as NSString).substring(with: scene.range).contains("## The Test"),
+            "this fixture no longer reproduces the overlap the test is about"
+        )
+
+        let movable = try XCTUnwrap(SceneReorder.movableRange(ofSceneAt: 2, in: model.script))
+        XCTAssertFalse(
+            (model.text as NSString).substring(with: movable).contains("##"),
+            "the movable span still carries a section heading"
+        )
+
+        let edit = try XCTUnwrap(SceneReorder.move(sceneAt: 2, before: 1, in: model.script))
+        model.apply(edit, undoManager: nil)
+
+        // The outline is unchanged in shape: three sequences, same order.
+        let after = BoardLayout(script: model.script)
+        XCTAssertEqual(after.columns.map(\.title), ["Arrival", "The Test", "Blackout"])
+        XCTAssertEqual(after.columns.first?.sceneIndices.count, 2)
     }
 
     func testMovingACardBetweenColumnsRewritesTheSource() throws {
@@ -122,7 +255,9 @@ final class BeatBoardTests: XCTestCase {
         let layout = BoardLayout(script: model.script)
         let theTest = try XCTUnwrap(layout.columns.first { $0.title == "The Test" })
         // Drag the cliff-road scene out of Blackout and into The Test.
-        let target = layout.destination(dropInto: theTest.id, at: 0)
+        guard case .before(let target)? = layout.drop(scene: 4, into: theTest.id, at: 0) else {
+            return XCTFail("dropping on the first card resolves to that card")
+        }
         let edit = try XCTUnwrap(
             SceneReorder.move(sceneAt: 4, before: target, in: model.script)
         )

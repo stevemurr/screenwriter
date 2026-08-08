@@ -69,18 +69,32 @@ struct BeatBoardView: View {
         .background(Color(nsColor: Style.chromeBackground))
     }
 
+    /// Applies a drop.
+    ///
+    /// The block that moves is `SceneReorder.movableRange`, not the scene's own
+    /// range: a scene runs to the next *scene* heading, so a section heading
+    /// sitting between two scenes belongs to the one above it and would be
+    /// carried along. A card dropped back where it already was must not dirty
+    /// the document, which `SceneReorder.move` decides — it returns nil when the
+    /// replacement would equal what is already there.
     private func move(scene: Int, into columnID: Int, at position: Int) {
-        let layout = self.layout
-        // A card dropped back where it already is must not dirty the document.
-        if let current = layout.position(of: scene),
-           current.columnID == columnID,
-           current.position == position || current.position == position - 1 {
-            return
-        }
-        let target = layout.destination(dropInto: columnID, at: position)
-        guard target != scene,
-              let edit = SceneReorder.move(sceneAt: scene, before: target, in: model.script)
+        guard let drop = layout.drop(scene: scene, into: columnID, at: position),
+              let range = SceneReorder.movableRange(ofSceneAt: scene, in: model.script)
         else { return }
+
+        let insertion: Int
+        switch drop {
+        case .before(let target):
+            guard let scene = model.script.scenes.first(where: { $0.index == target })
+            else { return }
+            insertion = scene.range.location
+        case .offset(let offset):
+            insertion = offset
+        }
+
+        guard let edit = SceneReorder.move(
+            range: range, to: insertion, in: model.script.source
+        ) else { return }
 
         model.apply(edit, undoManager: undoManager)
         selection = .scene(model.script.scene(at: edit.resultingOffset)?.index ?? scene)
@@ -94,6 +108,9 @@ private struct BoardColumnView: View {
     let onDrop: (Int, Int) -> Void
 
     @State private var isTargeted = false
+    /// The card a drag is currently over. Without it a drop is a guess: the card
+    /// under the pointer looks exactly like every other one.
+    @State private var targetedCard: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -105,15 +122,17 @@ private struct BoardColumnView: View {
                         scene: scene,
                         status: model.sceneMetadata(forSceneAt: index)?.status,
                         length: model.metric(forSceneAt: index)?.lengthDescription,
-                        isSelected: selection == .scene(index)
+                        isSelected: selection == .scene(index),
+                        isTargeted: targetedCard == index
                     )
                     .onTapGesture { selection = .scene(index) }
                     .draggable(String(index))
                     .dropDestination(for: String.self) { items, _ in
+                        targetedCard = nil
                         guard let dropped = items.first.flatMap(Int.init) else { return false }
                         onDrop(dropped, position)
                         return true
-                    }
+                    } isTargeted: { targetedCard = $0 ? index : (targetedCard == index ? nil : targetedCard) }
                 }
             }
 
@@ -196,6 +215,7 @@ private struct SceneCard: View {
     let status: SceneStatus?
     let length: String?
     let isSelected: Bool
+    let isTargeted: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -264,9 +284,15 @@ private struct SceneCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: Style.cornerRadius)
                 .strokeBorder(
-                    isSelected ? selectionAccent : Color.black.opacity(0.14),
-                    lineWidth: isSelected ? 2 : 1
+                    isTargeted ? selectionAccent : (isSelected ? selectionAccent : Color.black.opacity(0.14)),
+                    lineWidth: isTargeted ? 2.5 : (isSelected ? 2 : 1)
                 )
+        }
+        .overlay {
+            if isTargeted {
+                RoundedRectangle(cornerRadius: Style.cornerRadius)
+                    .fill(selectionAccent.opacity(0.10))
+            }
         }
         .shadow(
             color: isSelected ? selectionAccent.opacity(0.16) : Color.black.opacity(0.09),

@@ -37,7 +37,9 @@ public enum SceneReorder {
         before target: Int?,
         in script: ParsedScript
     ) -> Edit? {
-        guard let moving = script.scenes.first(where: { $0.index == index }) else { return nil }
+        guard let moving = script.scenes.first(where: { $0.index == index }),
+              let range = movableRange(ofSceneAt: index, in: script)
+        else { return nil }
         let destination: NSRange
         if let target {
             guard let scene = script.scenes.first(where: { $0.index == target }) else { return nil }
@@ -48,7 +50,31 @@ public enum SceneReorder {
             let end = script.scenes.reduce(0) { max($0, NSMaxRange($1.range)) }
             destination = NSRange(location: end, length: 0)
         }
-        return move(range: moving.range, to: destination.location, in: script.source)
+        return move(range: range, to: destination.location, in: script.source)
+    }
+
+    /// What moving a scene should actually relocate.
+    ///
+    /// **Not `ScriptScene.range`.** A scene's range runs to the *next scene
+    /// heading*, and a section heading between two scenes falls inside it — so
+    /// on the corpus shape of `## Arrival` over two scenes, the second scene's
+    /// range contains `## The Test`. Moving that scene took the next sequence's
+    /// heading along with it and quietly restructured the outline. Measured on
+    /// the board's own fixture: two of four scenes carried a heading they did
+    /// not own.
+    ///
+    /// `ScriptScene.range` is right for what it is for — a scene *is* everything
+    /// under its heading, which is what makes the preview and the metadata
+    /// anchors work. It is the wrong span to pick up and carry.
+    public static func movableRange(ofSceneAt index: Int, in script: ParsedScript) -> NSRange? {
+        guard let scene = script.scenes.first(where: { $0.index == index }) else { return nil }
+        // Everything after the heading itself, up to the first section heading.
+        for offset in scene.elementRange.dropFirst() where script.elements[offset].kind == .section {
+            let clipped = script.elements[offset].range.location - scene.range.location
+            guard clipped > 0 else { return nil }
+            return NSRange(location: scene.range.location, length: clipped)
+        }
+        return scene.range
     }
 
     /// Moves a whole section — an act or a sequence — and everything beneath it.
