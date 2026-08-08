@@ -3,6 +3,7 @@ Screenwriter.xcodeproj/
 
 # Build output
 build/
+build-release/
 .build/
 DerivedData/
 test-results/
