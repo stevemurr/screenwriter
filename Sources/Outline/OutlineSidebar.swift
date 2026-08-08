@@ -145,9 +145,21 @@ struct OutlineSidebar: View {
                     if !derived.characters.isEmpty {
                         Section("CHARACTERS") {
                             ForEach(derived.characters, id: \.self) { name in
-                                Label(name, systemImage: "person")
-                                    .font(.system(size: 12))
-                                    .tag(OutlineSelection.character(name))
+                                HStack(spacing: 6) {
+                                    Image(systemName: "person.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(
+                                            Color(nsColor: Style.Element.character).opacity(0.85)
+                                        )
+                                        .frame(width: 15)
+                                    Text(name)
+                                        .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+                                        .lineLimit(1)
+                                }
+                                .padding(.vertical, 1)
+                                .tag(OutlineSelection.character(name))
+                                .listRowInsets(EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 8))
+                                .listRowSeparator(.hidden)
                             }
                         }
                     }
@@ -202,11 +214,18 @@ struct OutlineSidebar: View {
         }
     }
 
+    /// Indentation is 9pt a level, not 14.
+    ///
+    /// The hierarchy is only ever three deep — act, sequence, scene — and at
+    /// 14pt a scene under a sequence started 42pt in, which threw away a sixth
+    /// of a 268pt sidebar to say something the icons already say. The rows carry
+    /// their level in their symbol and weight; the indent only has to be enough
+    /// to read as nesting.
     private func rowInsets(depth: Int) -> EdgeInsets {
         EdgeInsets(
-            top: 2,
-            leading: 8 + CGFloat(depth) * 14,
-            bottom: 2,
+            top: 1,
+            leading: 6 + CGFloat(depth) * 9,
+            bottom: 1,
             trailing: 8
         )
     }
@@ -383,6 +402,13 @@ enum OutlineTree {
     }
 }
 
+/// An act or a sequence.
+///
+/// The icon carries the level, so the type does not have to shout it: both
+/// weights sit a step apart rather than semibold-against-regular, and the icon
+/// is filled and tinted the same purple the editor gives a `#` line. Tying the
+/// navigator's colour to the source's is the cheapest way to make the two read
+/// as one document.
 private struct SectionRow: View {
     let node: SectionNode
     let sceneCount: Int
@@ -390,13 +416,16 @@ private struct SectionRow: View {
     let isExpanded: Bool
     let onToggle: () -> Void
 
+    private var isAct: Bool { node.depth == 1 }
+
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             if hasChildren {
                 Button(action: onToggle) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
-                        .frame(width: 10, height: 14)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .frame(width: 12, height: 16)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -406,58 +435,94 @@ private struct SectionRow: View {
                 .accessibilityIdentifier("outline.toggle.\(node.elementIndex)")
             } else {
                 Color.clear
-                    .frame(width: 10, height: 14)
+                    .frame(width: 12, height: 16)
                     .accessibilityHidden(true)
             }
 
-            Image(systemName: node.depth == 1 ? "square.stack" : "square.grid.2x2")
-                .foregroundStyle(.tertiary)
-                .font(.system(size: 10))
+            Image(systemName: isAct ? "square.stack.3d.up.fill" : "square.grid.2x2.fill")
+                .font(.system(size: isAct ? 12 : 11))
+                .foregroundStyle(Color(nsColor: Style.Element.section).opacity(isAct ? 0.9 : 0.55))
+                .frame(width: 15)
+
             Text(node.title)
-                .font(.system(size: 12, weight: node.depth == 1 ? .semibold : .regular))
+                .font(.system(size: isAct ? 12 : 11.5, weight: isAct ? .semibold : .medium))
+                .foregroundStyle(isAct ? .primary : .secondary)
                 .lineLimit(1)
+
             Spacer(minLength: 4)
+
             if sceneCount > 0 {
                 Text("\(sceneCount)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(
+                        Capsule().fill(Color.secondary.opacity(0.12))
+                    )
             }
         }
-        .padding(.vertical, 1)
+        .padding(.vertical, 2)
     }
 }
 
+/// One scene.
+///
+/// Two lines at most, never three. The length in eighths used to sit on its own
+/// row under the synopsis, which made every scene in the list a three-line block
+/// and meant a 95-scene script scrolled for a very long time to say very little.
+/// It reads better where a schedule puts it anyway — on the right, beside the
+/// heading it measures.
 private struct SceneRow: View {
     let scene: ScriptScene
     let metric: SceneMetric?
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(scene.number ?? "\(scene.index)")
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundStyle(.tertiary)
-                .frame(minWidth: 18, alignment: .trailing)
-                .padding(.top, 1)
+                .foregroundStyle(Color(nsColor: Style.Element.sceneHeading).opacity(0.75))
+                .frame(minWidth: 20, alignment: .trailing)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(scene.heading)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .lineLimit(2)
-                if let synopsis = scene.synopsis {
-                    Text(synopsis)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(scene.heading)
+                        .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    // The heading gets the whole line whenever there is a second
+                    // one to put the length on. Sharing the row with it cost
+                    // about six characters of slugline, which is the difference
+                    // between reading "INT. MOTEL ROOM - LATER" and "INT. MOTEL…".
+                    if scene.synopsis == nil {
+                        Spacer(minLength: 2)
+                        length
+                    }
                 }
-                if let metric {
-                    // Eighths of a page — how a schedule measures a scene.
-                    Text(metric.lengthDescription)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.tertiary)
+                if let synopsis = scene.synopsis {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(synopsis)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 2)
+                        length
+                    }
                 }
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 3)
         .contentShape(Rectangle())
+    }
+
+    /// Eighths of a page — how a schedule measures a scene.
+    @ViewBuilder
+    private var length: some View {
+        if let metric {
+            Text(metric.lengthDescription)
+                .font(.system(size: 9.5, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .layoutPriority(1)
+        }
     }
 }
